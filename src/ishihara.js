@@ -79,13 +79,37 @@ export const ISHIHARA_PLATES = [
 ];
 
 /**
+ * Devuelve las 4 opciones de respuesta barajadas aleatoriamente (Fisher-Yates),
+ * de modo que la respuesta correcta nunca quede fija en el mismo botón.
+ */
+export function getShuffledOptions(plate) {
+  if (!plate || !plate.options) return [];
+  const opts = [...plate.options];
+  for (let i = opts.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [opts[i], opts[j]] = [opts[j], opts[i]];
+  }
+  return opts;
+}
+
+/**
  * Genera el SVG auténtico de alta fidelidad de la lámina de Ishihara con fondo clínico,
- * puntos pseudoisocromáticos densos y distribución oftalmológica natural.
+ * puntos pseudoisocromáticos densos, distribución oftalmológica natural y variación de posición.
  */
 export function generateIshiharaSvg(plate) {
   const circles = [];
   const radius = 46;
   const center = 50;
+
+  // Variación sutil de traslación (-1.6 a +1.6) para que el número no quede en una posición 100% fija
+  const shiftX = (Math.random() - 0.5) * 3.2;
+  const shiftY = (Math.random() - 0.5) * 3.2;
+
+  const shiftedSeeds = plate.dotsSeed.map(s => ({
+    x: s.x + shiftX,
+    y: s.y + shiftY,
+    r: s.r
+  }));
 
   // Generar cuadrícula densa de puntos de fondo con variación orgánica
   for (let x = 8; x <= 92; x += 4.8) {
@@ -98,7 +122,7 @@ export function generateIshiharaSvg(plate) {
         const r = 1.9 + Math.random() * 2.3;
 
         // Comprobar cercanía a los puntos del número
-        const isNearSeed = plate.dotsSeed.some(seed => Math.hypot(seed.x - jx, seed.y - jy) < 4.2);
+        const isNearSeed = shiftedSeeds.some(seed => Math.hypot(seed.x - jx, seed.y - jy) < 4.2);
 
         if (!isNearSeed) {
           const color = plate.bgColors[Math.floor(Math.random() * plate.bgColors.length)];
@@ -109,11 +133,11 @@ export function generateIshiharaSvg(plate) {
   }
 
   // Insertar puntos del número con pigmentación característica
-  plate.dotsSeed.forEach(seed => {
+  shiftedSeeds.forEach(seed => {
     const color = plate.fgColors[Math.floor(Math.random() * plate.fgColors.length)];
     const r = seed.r * 0.82 + Math.random() * 0.7;
     // Puntos adicionales para un contorno natural y suave
-    circles.push(`<circle cx="${seed.x}" cy="${seed.y}" r="${r.toFixed(1)}" fill="${color}" opacity="0.98"/>`);
+    circles.push(`<circle cx="${seed.x.toFixed(1)}" cy="${seed.y.toFixed(1)}" r="${r.toFixed(1)}" fill="${color}" opacity="0.98"/>`);
     const offsetX = (Math.random() - 0.5) * 1.5;
     const offsetY = (Math.random() - 0.5) * 1.5;
     circles.push(`<circle cx="${(seed.x + offsetX).toFixed(1)}" cy="${(seed.y + offsetY).toFixed(1)}" r="${(r * 0.65).toFixed(1)}" fill="${color}" opacity="0.92"/>`);

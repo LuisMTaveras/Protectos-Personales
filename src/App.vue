@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getAudioContext, playAudiometryTone, playFeedbackSound, testStereoChannels, areChannelsInverted, setChannelsInverted } from './audio.js';
 import { VISION_ROUNDS, ORIENTATIONS, renderLandoltSvg } from './landolt.js';
 import { REACTION_COLORS } from './colorReaction.js';
-import { ISHIHARA_PLATES, generateIshiharaSvg } from './ishihara.js';
+import { ISHIHARA_PLATES, generateIshiharaSvg, getShuffledOptions } from './ishihara.js';
 import { speakInstruction, setVoiceMuted, isVoiceMuted } from './voice.js';
 
 // ==========================================================================
@@ -302,6 +302,8 @@ function finishVisionTest() {
 // ==========================================================================
 const ishiharaRound = ref(0);
 const ishiharaTotalRounds = computed(() => ISHIHARA_PLATES.length);
+const ishiharaSequence = ref([]);
+const currentIshiharaOptions = ref([]);
 const ishiharaResults = ref([]);
 const ishiharaWaiting = ref(false);
 const ishiharaTimeRemaining = ref('6.0s');
@@ -309,6 +311,9 @@ let ishiharaTimeoutId = null;
 let ishiharaCountdownInterval = null;
 
 const currentIshiharaPlate = computed(() => {
+  if (ishiharaSequence.value.length > 0) {
+    return ishiharaSequence.value[ishiharaRound.value] || ishiharaSequence.value[0];
+  }
   return ISHIHARA_PLATES[ishiharaRound.value] || ISHIHARA_PLATES[0];
 });
 
@@ -334,6 +339,11 @@ function startIshiharaTest() {
   ishiharaRound.value = 0;
   ishiharaResults.value = [];
   ishiharaWaiting.value = false;
+
+  // Lámina 1 (12) como control clínico, y el resto de láminas diagnósticas barajadas
+  const control = ISHIHARA_PLATES[0];
+  const others = [...ISHIHARA_PLATES.slice(1)].sort(() => Math.random() - 0.5);
+  ishiharaSequence.value = [control, ...others];
 }
 
 function beginActiveIshiharaTest() {
@@ -353,6 +363,9 @@ function nextIshiharaRound() {
   clearIshiharaTimers();
   ishiharaWaiting.value = true;
   ishiharaTimeRemaining.value = examMode.value === 'official' ? '6.0s' : 'Libre';
+
+  // Barajar las 4 opciones para que la respuesta correcta nunca quede en el mismo botón ni posición
+  currentIshiharaOptions.value = getShuffledOptions(currentIshiharaPlate.value);
 
   if (examMode.value === 'official') {
     const start = performance.now();
@@ -1526,7 +1539,7 @@ onUnmounted(() => {
             <p class="hint-text">Seleccione el número que ve dentro de los puntos de la lámina:</p>
             <div class="ishihara-options-grid">
               <button 
-                v-for="opt in currentIshiharaPlate.options" 
+                v-for="opt in currentIshiharaOptions" 
                 :key="opt"
                 class="ishihara-option-btn"
                 @pointerdown.prevent="handleIshiharaAnswer(opt)"
