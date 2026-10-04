@@ -3,11 +3,31 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getAudioContext, playAudiometryTone, playFeedbackSound, testStereoChannels } from './audio.js';
 import { VISION_ROUNDS, ORIENTATIONS, renderLandoltSvg } from './landolt.js';
 import { REACTION_COLORS } from './colorReaction.js';
+import { ISHIHARA_PLATES, generateIshiharaSvg } from './ishihara.js';
+import { speakInstruction, setVoiceMuted, isVoiceMuted } from './voice.js';
 
-// --- ESTADOS DE LA APLICACIÓN ---
-const currentStage = ref('intro'); // 'intro' | 'vision' | 'audio' | 'reaction' | 'results'
+// ==========================================================================
+// CONFIGURACIÓN GLOBAL & ESTADOS
+// ==========================================================================
+const currentStage = ref('intro'); // 'intro' | 'vision' | 'ishihara' | 'audio' | 'reaction' | 'results'
+const examMode = ref('official'); // 'official' (con límites estrictos) | 'practice' (pedagógico sin tiempo)
+const voiceActive = ref(true);
 
-// Toast flotante
+// Modales interactivos
+const showCalibrationModal = ref(false);
+const showAdviceModal = ref(false);
+
+// Calibración de pantalla (ancho simulado de una cédula de identidad / tarjeta de crédito = 85.6 mm)
+const calibrationCardWidth = ref(324); // px por defecto en pantalla estándar ~3.8 px/mm
+
+const scaleMultiplier = computed(() => {
+  return calibrationCardWidth.value / 324;
+});
+
+// Código único de sesión médica (generado en memoria)
+const sessionReportId = ref(`INTRANT-MED-${Math.random().toString(36).substring(2, 8).toUpperCase()}`);
+
+// Toast clínico flotante
 const toastText = ref('');
 const toastType = ref('info');
 const toastVisible = ref(false);
@@ -23,9 +43,27 @@ function showToast(message, type = 'info') {
   }, 2300);
 }
 
+function toggleVoice() {
+  voiceActive.value = !voiceActive.value;
+  setVoiceMuted(!voiceActive.value);
+  showToast(voiceActive.value ? 'Asistente de voz médica activado.' : 'Asistente de voz silenciado.', 'info');
+  if (voiceActive.value) {
+    speakInstruction('Asistente de voz clínico activo.');
+  }
+}
+
+function setExamMode(mode) {
+  examMode.value = mode;
+  if (mode === 'official') {
+    showToast('Modo Oficial activado: Tiempos límite reglamentarios estrictos.', 'info');
+  } else {
+    showToast('Modo Práctica activado: Sin penalización de tiempo.', 'info');
+  }
+}
+
 // ==========================================================================
 // 1. PRUEBA DE VISIÓN MONOCULAR BILATERAL (OJO DERECHO + OJO IZQUIERDO)
-// Letra C cerrada con hendidura fina y límite de 2.5s por intento
+// Landolt C cerrada con hendidura fina
 // ==========================================================================
 const currentEye = ref('OD'); // 'OD' (Ojo Derecho) | 'OI' (Ojo Izquierdo)
 const eyePhase = ref('test'); // 'test' | 'transition'
@@ -47,9 +85,14 @@ const currentRoundData = computed(() => {
   return VISION_ROUNDS[visionRound.value] || VISION_ROUNDS[0];
 });
 
+const currentCalibratedSize = computed(() => {
+  const baseSize = currentRoundData.value ? currentRoundData.value.sizePx : 64;
+  return Math.max(18, Math.round(baseSize * scaleMultiplier.value));
+});
+
 const currentLandoltSvg = computed(() => {
   if (!currentVisionOrientation.value || !currentRoundData.value) return '';
-  return renderLandoltSvg(currentVisionOrientation.value.id, currentRoundData.value.sizePx);
+  return renderLandoltSvg(currentVisionOrientation.value.id, currentCalibratedSize.value);
 });
 
 function clearVisionTimers() {
@@ -72,6 +115,8 @@ function startVisionTest() {
   visionResultsOI.value = [];
   isVisionWaiting.value = false;
 
+  speakInstruction('Iniciando prueba de agudeza visual. Tápese el ojo izquierdo con una mano sin presionar el globo ocular. Indique la dirección de la abertura de la letra C.');
+
   prepareEyeSequence();
   nextVisionRound();
 }
@@ -84,15 +129,14 @@ function prepareEyeSequence() {
 
 function nextVisionRound() {
   if (visionRound.value >= visionTotalRounds) {
-    // Si terminó el ojo derecho, pasar a transición de cambio de ojo
     if (currentEye.value === 'OD') {
       clearVisionTimers();
       isVisionWaiting.value = false;
       eyePhase.value = 'transition';
+      speakInstruction('Fase de ojo derecho completada. Ahora destape su ojo izquierdo y tápese el ojo derecho.');
       showToast('Ojo Derecho completado. Cambie de ojo.', 'info');
       return;
     } else {
-      // Si terminó el ojo izquierdo, finalizar examen de visión
       finishVisionTest();
       return;
     }
@@ -100,18 +144,19 @@ function nextVisionRound() {
 
   clearVisionTimers();
   currentVisionOrientation.value = visionSequence.value[visionRound.value];
-  visionTimeRemaining.value = '2.5s';
+  visionTimeRemaining.value = examMode.value === 'official' ? '2.5s' : 'Libre';
   visionIsUrgent.value = false;
   isVisionWaiting.value = true;
-
   visionStartTime = performance.now();
-  startVisionCountdown(2500);
 
-  visionTimeoutId = setTimeout(() => {
-    if (isVisionWaiting.value) {
-      handleVisionTimeout();
-    }
-  }, 2500);
+  if (examMode.value === 'official') {
+    startVisionCountdown(2500);
+    visionTimeoutId = setTimeout(() => {
+      if (isVisionWaiting.value) {
+        handleVisionTimeout();
+      }
+    }, 2500);
+  }
 }
 
 function continueWithLeftEye() {
@@ -119,6 +164,7 @@ function continueWithLeftEye() {
   eyePhase.value = 'test';
   visionRound.value = 0;
   prepareEyeSequence();
+  speakInstruction('Iniciando evaluación de ojo izquierdo. Indique hacia dónde apunta la abertura.');
   nextVisionRound();
 }
 
@@ -156,7 +202,7 @@ function handleVisionAnswer(selectedDir) {
     given: ORIENTATIONS.find(o => o.id === selectedDir)?.label || selectedDir,
     isCorrect,
     snellen: currentRoundData.value.snellen,
-    sizePx: currentRoundData.value.sizePx,
+    sizePx: currentCalibratedSize.value,
     timeMs: responseMs
   };
 
@@ -184,7 +230,7 @@ function handleVisionTimeout() {
     given: 'Tiempo Agotado (>2.5s)',
     isCorrect: false,
     snellen: currentRoundData.value.snellen,
-    sizePx: currentRoundData.value.sizePx,
+    sizePx: currentCalibratedSize.value,
     timeMs: 2500
   };
 
@@ -201,14 +247,122 @@ function handleVisionTimeout() {
 
 function finishVisionTest() {
   clearVisionTimers();
-  showToast('Evaluación de ambos ojos finalizada. Pasando a Audiometría...', 'success');
+  showToast('Evaluación de ambos ojos finalizada. Pasando a Visión Cromática...', 'success');
   setTimeout(() => {
-    startAudioTest();
-  }, 850);
+    startIshiharaTest();
+  }, 750);
 }
 
 // ==========================================================================
-// 2. PRUEBA DE AUDIOMETRÍA A CIEGAS (LÍMITE DE 2.0s)
+// 2. PRUEBA DE DISCRIMINACIÓN CROMÁTICA / DALTONISMO (LÁMINAS DE ISHIHARA)
+// ==========================================================================
+const ishiharaRound = ref(0);
+const ishiharaTotalRounds = computed(() => ISHIHARA_PLATES.length);
+const ishiharaResults = ref([]);
+const ishiharaWaiting = ref(false);
+const ishiharaTimeRemaining = ref('6.0s');
+let ishiharaTimeoutId = null;
+let ishiharaCountdownInterval = null;
+
+const currentIshiharaPlate = computed(() => {
+  return ISHIHARA_PLATES[ishiharaRound.value] || ISHIHARA_PLATES[0];
+});
+
+const currentIshiharaSvg = computed(() => {
+  if (!currentIshiharaPlate.value) return '';
+  return generateIshiharaSvg(currentIshiharaPlate.value);
+});
+
+function clearIshiharaTimers() {
+  if (ishiharaTimeoutId) {
+    clearTimeout(ishiharaTimeoutId);
+    ishiharaTimeoutId = null;
+  }
+  if (ishiharaCountdownInterval) {
+    clearInterval(ishiharaCountdownInterval);
+    ishiharaCountdownInterval = null;
+  }
+}
+
+function startIshiharaTest() {
+  currentStage.value = 'ishihara';
+  ishiharaRound.value = 0;
+  ishiharaResults.value = [];
+  ishiharaWaiting.value = false;
+
+  speakInstruction('Prueba de discriminación de colores de Ishihara. Identifique el número oculto en la lámina circular y selecciónelo abajo.');
+  nextIshiharaRound();
+}
+
+function nextIshiharaRound() {
+  if (ishiharaRound.value >= ishiharaTotalRounds.value) {
+    finishIshiharaTest();
+    return;
+  }
+
+  clearIshiharaTimers();
+  ishiharaWaiting.value = true;
+  ishiharaTimeRemaining.value = examMode.value === 'official' ? '6.0s' : 'Libre';
+
+  if (examMode.value === 'official') {
+    const start = performance.now();
+    ishiharaCountdownInterval = setInterval(() => {
+      const elapsed = performance.now() - start;
+      const remaining = Math.max(0, 6000 - elapsed);
+      ishiharaTimeRemaining.value = `${(remaining / 1000).toFixed(1)}s`;
+
+      if (remaining <= 0) {
+        clearInterval(ishiharaCountdownInterval);
+        ishiharaCountdownInterval = null;
+      }
+    }, 100);
+
+    ishiharaTimeoutId = setTimeout(() => {
+      if (ishiharaWaiting.value) {
+        handleIshiharaAnswer('Tiempo Agotado');
+      }
+    }, 6000);
+  }
+}
+
+function handleIshiharaAnswer(chosenOption) {
+  if (!ishiharaWaiting.value || currentStage.value !== 'ishihara') return;
+
+  ishiharaWaiting.value = false;
+  clearIshiharaTimers();
+
+  const plate = currentIshiharaPlate.value;
+  const isCorrect = (chosenOption === plate.expectedNumber);
+  playFeedbackSound(isCorrect);
+
+  ishiharaResults.value.push({
+    plateId: plate.id,
+    plateName: plate.name,
+    expected: plate.expectedNumber,
+    given: chosenOption,
+    isCorrect
+  });
+
+  if (isCorrect) {
+    showToast(`Lámina ${plate.id}: Identificación correcta (${chosenOption}).`, 'success');
+  } else {
+    showToast(`Lámina ${plate.id}: Número no identificado correctamente.`, 'error');
+  }
+
+  ishiharaRound.value++;
+  setTimeout(() => nextIshiharaRound(), 400);
+}
+
+function finishIshiharaTest() {
+  clearIshiharaTimers();
+  showToast('Visión cromática completada. Pasando a Audiometría...', 'success');
+  setTimeout(() => {
+    startAudioTest();
+  }, 750);
+}
+
+// ==========================================================================
+// 3. PRUEBA DE AUDIOMETRÍA A CIEGAS (LÍMITE DE 2.0s)
 // ==========================================================================
 const audioRound = ref(0);
 const audioTotalRounds = 5;
@@ -240,6 +394,8 @@ function startAudioTest() {
   audioResults.value = [];
   isAudioWaiting.value = false;
 
+  speakInstruction('Prueba de audiometría a ciegas. Use audífonos. Indique si escucha por el lado izquierdo, por el derecho, o si hay silencio.');
+
   const pool = ['left', 'right', 'none', 'left', 'right'];
   audioSequence.value = pool.sort(() => Math.random() - 0.5);
 
@@ -255,28 +411,30 @@ async function nextAudioRound() {
   clearAudioTimers();
   isAudioWaiting.value = false;
 
-  audioTimeRemaining.value = '2.0s';
+  audioTimeRemaining.value = examMode.value === 'official' ? '2.0s' : 'Libre';
   audioIsUrgent.value = false;
   audioStateLabel.value = 'Preparando emisión...';
 
   const target = audioSequence.value[audioRound.value];
 
-  await new Promise(r => setTimeout(r, 600));
+  await new Promise(r => setTimeout(r, 650));
 
   audioStateLabel.value = '¡Escuche sus audífonos!';
-  const freq = target === 'none' ? 0 : (850 + Math.floor(Math.random() * 5) * 200);
+  const freq = target === 'none' ? 0 : (900 + Math.floor(Math.random() * 4) * 250);
 
-  playAudiometryTone(target, 750, freq);
+  playAudiometryTone(target, 700, freq);
 
   isAudioWaiting.value = true;
   audioStartTime = performance.now();
-  startAudioCountdown(2000);
 
-  audioTimeoutId = setTimeout(() => {
-    if (isAudioWaiting.value) {
-      handleAudioTimeout();
-    }
-  }, 2000);
+  if (examMode.value === 'official') {
+    startAudioCountdown(2000);
+    audioTimeoutId = setTimeout(() => {
+      if (isAudioWaiting.value) {
+        handleAudioTimeout();
+      }
+    }, 2000);
+  }
 }
 
 function startAudioCountdown(totalMs) {
@@ -354,14 +512,14 @@ function handleAudioTimeout() {
 
 function finishAudioTest() {
   clearAudioTimers();
-  showToast('Audiometría finalizada. Pasando a Reflejos (2s por color)...', 'success');
+  showToast('Audiometría finalizada. Pasando a Reflejos (Semáforo)...', 'success');
   setTimeout(() => {
     startReactionTest();
-  }, 850);
+  }, 750);
 }
 
 // ==========================================================================
-// 3. PRUEBA DE REFLEJOS & SEMÁFORO (LÍMITE 2.0s)
+// 4. PRUEBA DE REFLEJOS & SEMÁFORO (LÍMITE 2.0s)
 // ==========================================================================
 const reactionTargetCount = 5;
 const reactionSuccessCount = ref(0);
@@ -404,8 +562,10 @@ function startReactionTest() {
   reactionTimes.value = [];
   reactionHistory.value = [];
   currentColor.value = null;
-  reactionTimeRemaining.value = '2.0s';
+  reactionTimeRemaining.value = examMode.value === 'official' ? '2.0s' : 'Libre';
   reactionIsUrgent.value = false;
+
+  speakInstruction('Prueba de tiempo de reacción. Presione el pulsador o la barra espaciadora únicamente cuando vea el círculo verde.');
 
   scheduleNextStimulus();
 }
@@ -415,7 +575,7 @@ function scheduleNextStimulus() {
 
   clearReactionTimers();
   currentColor.value = null;
-  reactionTimeRemaining.value = '2.0s';
+  reactionTimeRemaining.value = examMode.value === 'official' ? '2.0s' : 'Libre';
   reactionIsUrgent.value = false;
 
   const pauseMs = 800 + Math.random() * 1000;
@@ -435,27 +595,37 @@ function presentStimulus() {
   }
 
   stimulusStartTime = performance.now();
-  startReactionCountdown(2000);
 
-  if (currentColor.value.isTarget) {
-    reactionTimerId = setTimeout(() => {
-      if (!isReactionRunning) return;
-      if (currentColor.value && currentColor.value.isTarget) {
-        reactionHistory.value.push({
-          color: 'Verde (Tiempo Agotado)',
-          reactionMs: 2000,
-          outcome: 'Tiempo Agotado (>2.0s) - No respondió'
-        });
-        playFeedbackSound(false);
-        showToast('¡Tiempo agotado (2.0s)! No tocó a tiempo en Verde.', 'error');
+  if (examMode.value === 'official') {
+    startReactionCountdown(2000);
+    if (currentColor.value.isTarget) {
+      reactionTimerId = setTimeout(() => {
+        if (!isReactionRunning) return;
+        if (currentColor.value && currentColor.value.isTarget) {
+          reactionHistory.value.push({
+            color: 'Verde (Tiempo Agotado)',
+            reactionMs: 2000,
+            outcome: 'Tiempo Agotado (>2.0s) - No respondió'
+          });
+          playFeedbackSound(false);
+          showToast('¡Tiempo agotado (2.0s)! No tocó a tiempo en Verde.', 'error');
+          scheduleNextStimulus();
+        }
+      }, 2000);
+    } else {
+      reactionTimerId = setTimeout(() => {
+        if (!isReactionRunning) return;
         scheduleNextStimulus();
-      }
-    }, 2000);
+      }, 1800);
+    }
   } else {
-    reactionTimerId = setTimeout(() => {
-      if (!isReactionRunning) return;
-      scheduleNextStimulus();
-    }, 1800);
+    // Modo práctica sin timeout estricto
+    if (!currentColor.value.isTarget) {
+      reactionTimerId = setTimeout(() => {
+        if (!isReactionRunning) return;
+        scheduleNextStimulus();
+      }, 2000);
+    }
   }
 }
 
@@ -533,10 +703,12 @@ function finishReactionTest() {
   isReactionRunning = false;
   clearReactionTimers();
   currentStage.value = 'results';
+
+  speakInstruction(isApproved.value ? 'Evaluación finalizada con éxito. Postulante cumple con los criterios reglamentarios.' : 'Evaluación finalizada. Uno o más parámetros requieren atención o revaloración.');
 }
 
 // ==========================================================================
-// 4. DICTAMEN MÉDICO FINAL (EVALUACIÓN MONOCULAR OD + OI)
+// 5. DICTAMEN MÉDICO FINAL & RESULTADOS COMPLETOS
 // ==========================================================================
 const visionHitsOD = computed(() => visionResultsOD.value.filter(r => r.isCorrect).length);
 const visionHitsOI = computed(() => visionResultsOI.value.filter(r => r.isCorrect).length);
@@ -554,6 +726,9 @@ const bestSnellenOI = computed(() => {
   return correct.length > 0 ? correct[correct.length - 1].snellen : 'Menor a 20/100';
 });
 
+const ishiharaHits = computed(() => ishiharaResults.value.filter(r => r.isCorrect).length);
+const ishiharaPct = computed(() => Math.round((ishiharaHits.value / ishiharaTotalRounds.value) * 100));
+
 const audioHits = computed(() => audioResults.value.filter(r => r.isCorrect).length);
 const audioPct = computed(() => Math.round((audioHits.value / audioTotalRounds) * 100));
 
@@ -567,25 +742,25 @@ const verdictClass = computed(() => isApproved.value ? 'apto' : 'no-apto');
 const verdictOutcome = computed(() => {
   if (isApproved.value) {
     const avg = typeof currentAvgMs.value === 'number' ? currentAvgMs.value : 999;
-    if (visionHitsOD.value === 5 && visionHitsOI.value === 5 && audioHits.value === 5 && avg < 380) {
-      return 'APTO (CALIFICACIÓN SOBRESALIENTE)';
+    if (visionHitsOD.value === 5 && visionHitsOI.value === 5 && ishiharaHits.value === 3 && audioHits.value === 5 && avg < 380) {
+      return 'APTO (CALIFICACIÓN CLÍNICA SOBRESALIENTE)';
     } else if (visionHitsOD.value < 4 || visionHitsOI.value < 4) {
-      return 'APTO CON CONDICIÓN (REQUIERE LENTES)';
+      return 'APTO CON CONDICIÓN (RESTRICCIÓN 01: LENTES OBLIGATORIOS)';
     } else {
-      return 'APTO PARA CONDUCCIÓN DE VEHÍCULOS';
+      return 'APTO PARA CONDUCCIÓN DE VEHÍCULOS DE MOTOR';
     }
   }
-  return 'NO APTO TEMPORAL (REQUIERE REVALORACIÓN)';
+  return 'NO APTO TEMPORAL (REQUIERE REVALORACIÓN MÉDICA)';
 });
 
 const verdictNotes = computed(() => {
   if (isApproved.value) {
     if (visionHitsOD.value < 4 || visionHitsOI.value < 4) {
-      return 'Aprobado condicionado al uso obligatorio de cristales correctores para conducción vial según la agudeza monocular obtenida en OD y OI.';
+      return 'Aprobado condicionado al uso estricto y obligatorio de cristales correctores para la conducción vial, según la agudeza monocular registrada.';
     }
-    return 'El postulante satisface plenamente los requisitos psicofísicos y sensoriales mínimos en ambos ojos, audición a ciegas y reflejos en 2s.';
+    return 'El postulante satisface plenamente los requerimientos psicofísicos y sensoriales normativos en ambos ojos (OD/OI), discriminación cromática, audición a ciegas y reactimetría.';
   }
-  return 'Uno o más parámetros (visión de OD u OI con tiempo, audiometría a ciegas o reflejos en 2s) no alcanzaron el estándar reglamentario.';
+  return 'Uno o más parámetros sensoriales (agudeza monocular, discriminación auditiva o velocidad refleja) no alcanzaron el umbral mínimo exigido.';
 });
 
 const allVisionResultsCombined = computed(() => {
@@ -603,6 +778,7 @@ function printReport() {
 
 function resetAllTests() {
   clearVisionTimers();
+  clearIshiharaTimers();
   clearAudioTimers();
   clearReactionTimers();
   isReactionRunning = false;
@@ -610,13 +786,16 @@ function resetAllTests() {
   eyePhase.value = 'test';
   visionResultsOD.value = [];
   visionResultsOI.value = [];
+  ishiharaResults.value = [];
   audioResults.value = [];
-  reactionResults.value = null;
+  reactionTimes.value = [];
+  reactionHistory.value = [];
   currentStage.value = 'intro';
-  showToast('Evaluación reiniciada. Memoria limpia.', 'info');
+  sessionReportId.value = `INTRANT-MED-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+  showToast('Evaluación reiniciada. Memoria volátil restaurada.', 'info');
 }
 
-// Eventos de teclado global
+// Manejador global de teclado físico
 function onKeydown(e) {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
     e.preventDefault();
@@ -647,65 +826,146 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown);
   clearVisionTimers();
+  clearIshiharaTimers();
   clearAudioTimers();
   clearReactionTimers();
 });
 </script>
 
 <template>
-  <div class="app-background">
-    <div class="glow-orb orb-1"></div>
-    <div class="glow-orb orb-2"></div>
-    <div class="glow-orb orb-3"></div>
-    <div class="medical-grid-overlay"></div>
-  </div>
+  <!-- Fondo de Estación Médica (Sin orbes de IA, rejilla milimétrica sobria) -->
+  <div class="clinical-grid-backdrop"></div>
 
   <main class="app-container">
-    <!-- Encabezado Oficial -->
+    <!-- Barra Superior de Telemetría y Controles del Sistema -->
+    <aside class="top-system-toolbar" aria-label="Controles del sistema de diagnóstico">
+      <div class="system-status-indicator">
+        <span class="status-beacon"></span>
+        <span>SISTEMA PSICOFÍSICO EN LÍNEA &bull; MEMORIA VOLÁTIL</span>
+      </div>
+
+      <div class="toolbar-controls">
+        <!-- Toggle Modo de Examen -->
+        <button 
+          type="button" 
+          class="tool-chip-btn" 
+          :class="{ active: examMode === 'official' }"
+          @click="setExamMode(examMode === 'official' ? 'practice' : 'official')"
+          title="Cambiar entre Examen Oficial (con límite de tiempo) y Modo Práctica"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <span>{{ examMode === 'official' ? 'Modo: Oficial (Estricto)' : 'Modo: Práctica Libre' }}</span>
+        </button>
+
+        <!-- Toggle Voz Asistente -->
+        <button 
+          type="button" 
+          class="tool-chip-btn" 
+          :class="{ active: voiceActive }"
+          @click="toggleVoice"
+          title="Activar o silenciar instrucciones por voz clínica"
+        >
+          <svg v-if="voiceActive" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+          </svg>
+          <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+            <line x1="23" y1="9" x2="17" y2="15"/>
+            <line x1="17" y1="9" x2="23" y2="15"/>
+          </svg>
+          <span>{{ voiceActive ? 'Voz: Activa' : 'Voz: Silenciada' }}</span>
+        </button>
+
+        <!-- Botón Calibración mm -->
+        <button 
+          type="button" 
+          class="tool-chip-btn" 
+          @click="showCalibrationModal = true"
+          title="Ajustar tamaño en milímetros con tarjeta de crédito o cédula"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="5" width="20" height="14" rx="2"/>
+            <line x1="2" y1="10" x2="22" y2="10"/>
+          </svg>
+          <span>Calibrar Pantalla</span>
+        </button>
+
+        <!-- Botón Consejos INTRANT -->
+        <button 
+          type="button" 
+          class="tool-chip-btn" 
+          @click="showAdviceModal = true"
+          title="Requisitos oficiales y recomendaciones para el examen"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="16" x2="12" y2="12"/>
+            <line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          <span>Requisitos INTRANT</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Encabezado Institucional INTRANT -->
     <header class="official-header">
       <div class="brand-group">
         <div class="seal-badge">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z"/>
             <path d="M9 12l2 2 4-4"/>
           </svg>
-          <span>EVALUACIÓN MÉDICA VIRTUAL (VUE 3)</span>
+          <span>REPÚBLICA DOMINICANA &bull; UNIDAD DE DIAGNÓSTICO CONDUCTORES</span>
         </div>
         <h1 class="system-title">SIMULADOR PSICOFÍSICO <span>INTRANT</span></h1>
       </div>
-      <div class="privacy-badge">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="10"/>
-          <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
-        </svg>
-        <span>Sin almacenamiento ni recopilación de datos</span>
+      <div class="header-badges-cluster">
+        <div class="badge-tag" :class="examMode === 'official' ? 'mode-official' : 'mode-practice'">
+          {{ examMode === 'official' ? 'Examen Oficial (Tiempos Estrictos)' : 'Modo Práctica Libre' }}
+        </div>
+        <div class="badge-tag privacy">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          <span>100% Privado en Memoria</span>
+        </div>
       </div>
     </header>
 
-    <!-- Stepper de Fases -->
-    <nav class="phase-stepper" aria-label="Progreso de evaluación">
+    <!-- Stepper de Fases (6 etapas completas) -->
+    <nav class="phase-stepper" aria-label="Progreso de evaluación psicofísica">
       <div class="step-node" :class="{ active: currentStage === 'intro', completed: currentStage !== 'intro' }">
         <span class="step-num">0</span>
         <span class="step-label">Inicio</span>
       </div>
       <div class="step-connector"></div>
-      <div class="step-node" :class="{ active: currentStage === 'vision', completed: ['audio', 'reaction', 'results'].includes(currentStage) }">
+      <div class="step-node" :class="{ active: currentStage === 'vision', completed: ['ishihara', 'audio', 'reaction', 'results'].includes(currentStage) }">
         <span class="step-num">1</span>
-        <span class="step-label">Visión (OD + OI)</span>
+        <span class="step-label">Visión (OD+OI)</span>
+      </div>
+      <div class="step-connector"></div>
+      <div class="step-node" :class="{ active: currentStage === 'ishihara', completed: ['audio', 'reaction', 'results'].includes(currentStage) }">
+        <span class="step-num">2</span>
+        <span class="step-label">Daltonismo</span>
       </div>
       <div class="step-connector"></div>
       <div class="step-node" :class="{ active: currentStage === 'audio', completed: ['reaction', 'results'].includes(currentStage) }">
-        <span class="step-num">2</span>
+        <span class="step-num">3</span>
         <span class="step-label">Audiometría</span>
       </div>
       <div class="step-connector"></div>
       <div class="step-node" :class="{ active: currentStage === 'reaction', completed: currentStage === 'results' }">
-        <span class="step-num">3</span>
+        <span class="step-num">4</span>
         <span class="step-label">Reflejos</span>
       </div>
       <div class="step-connector"></div>
       <div class="step-node" :class="{ active: currentStage === 'results' }">
-        <span class="step-num">4</span>
+        <span class="step-num">5</span>
         <span class="step-label">Dictamen</span>
       </div>
     </nav>
@@ -713,20 +973,25 @@ onUnmounted(() => {
     <!-- Contenedor Principal de Pantallas -->
     <section class="test-viewport">
       
-      <!-- PANTALLA 0: INTRODUCCIÓN -->
+      <!-- PANTALLA 0: INTRODUCCIÓN Y CALIBRACIÓN -->
       <article v-if="currentStage === 'intro'" class="view-panel active">
         <div class="intro-hero">
           <div class="status-chip ready">
             <span class="pulse-dot"></span>
-            SISTEMA CALIBRADO Y LISTO
+            DISPOSITIVO CALIBRADO &bull; PROTOCOLO PSICOFÍSICO COMPLETO
           </div>
-          <h2 class="hero-heading">Pruebas Sensoriales y Psicométricas</h2>
+          <h2 class="hero-heading">Evaluación Sensorial y Psicométrica para Conductores</h2>
           <p class="hero-desc">
-            Evaluación psicofísica para conductores: <strong>Agudeza Visual Bilateral (Ojo Derecho y Ojo Izquierdo con letra C cerrada)</strong>, <strong>Localización Auditiva a Ciegas (2.0s)</strong> y <strong>Tiempo de Reacción Cromático (2.0s)</strong>.
+            Simulador clínico basado en la normativa oficial de la República Dominicana: 
+            <strong>Agudeza Visual Monocular (Letra C cerrada, Ojo Derecho y Ojo Izquierdo)</strong>, 
+            <strong>Test de Ishihara (Percepción Cromática)</strong>, 
+            <strong>Audiometría Estéreo a Ciegas (2.0s)</strong> y 
+            <strong>Reactimetría Cromática de Frenado (2.0s)</strong>.
           </p>
         </div>
 
         <div class="test-cards-grid">
+          <!-- Tarjeta 1: Visión Monocular -->
           <div class="feature-card">
             <div class="card-icon vision-icon">
               <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
@@ -734,10 +999,24 @@ onUnmounted(() => {
                 <circle cx="12" cy="12" r="3"/>
               </svg>
             </div>
-            <h3>1. Visión (1 con cada Ojo)</h3>
-            <p>Primero se tapará el <strong>ojo izquierdo</strong> (evaluando el derecho), y luego el <strong>ojo derecho</strong> (evaluando el izquierdo). La letra C es más cerrada por dentro y con hendidura fina (2.5s por intento).</p>
+            <h3>1. Visión Monocular (OD + OI)</h3>
+            <p>Se evalúa cada ojo por separado: primero el <strong>ojo derecho</strong> (tapando el izquierdo) y luego el <strong>ojo izquierdo</strong>. La letra C es más cerrada y con hendidura fina (2.5s por intento).</p>
           </div>
 
+          <!-- Tarjeta 2: Test de Ishihara -->
+          <div class="feature-card">
+            <div class="card-icon ishihara-icon">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M8 12a4 4 0 0 1 8 0"/>
+                <circle cx="12" cy="12" r="1"/>
+              </svg>
+            </div>
+            <h3>2. Daltonismo (Ishihara)</h3>
+            <p>3 láminas de prueba clínica para descartar ceguera al rojo-verde (protanopía/deuteranopía), indispensable para interpretar semáforos y señalización vial nocturna.</p>
+          </div>
+
+          <!-- Tarjeta 3: Audiometría Estéreo -->
           <div class="feature-card">
             <div class="card-icon audio-icon">
               <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
@@ -745,10 +1024,11 @@ onUnmounted(() => {
                 <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>
               </svg>
             </div>
-            <h3>2. Audiometría a Ciegas (2.0s)</h3>
-            <p>Use audífonos. Indique con [← Izq] o [Der →] el canal emisor. La pantalla no delatará el lado. Si hay silencio total, pulse [ESPACIO].</p>
+            <h3>3. Audiometría a Ciegas (2.0s)</h3>
+            <p>Use audífonos. Indique con [← Izq] o [Der →] el canal emisor. La pantalla no delatará de qué lado suena. Si hay silencio, presione [ESPACIO].</p>
           </div>
 
+          <!-- Tarjeta 4: Reflejo Semáforo -->
           <div class="feature-card">
             <div class="card-icon reaction-icon">
               <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
@@ -756,28 +1036,29 @@ onUnmounted(() => {
                 <polyline points="12 6 12 12 16 14"/>
               </svg>
             </div>
-            <h3>3. Reflejo Verde (2.0s)</h3>
-            <p>Toque el botón táctil o pulse [ESPACIO] en menos de 2 segundos <strong>exclusivamente cuando aparezca el círculo VERDE</strong>.</p>
+            <h3>4. Reactímetro Verde (2.0s)</h3>
+            <p>Toque el botón táctil o pulse [ESPACIO] en menos de 2 segundos <strong>exclusivamente cuando aparezca el círculo VERDE</strong>. No toque en distractores.</p>
           </div>
         </div>
 
+        <!-- Barra de prueba de audio y configuración -->
         <div class="hardware-check-box">
           <div class="check-item">
             <span class="check-badge">Bilateral</span>
-            <span>Evaluación monocular separada: 5 intentos OD + 5 intentos OI.</span>
+            <span>Evaluación monocular independiente con escala Snellen calibrada.</span>
           </div>
           <button type="button" class="btn-sound-test" @pointerdown.prevent="testStereoChannels">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
               <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
               <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
             </svg>
-            Probar Sonido Estéreo
+            Probar Audífonos Estéreo
           </button>
         </div>
 
         <div class="action-footer">
           <button type="button" class="btn-primary-action" @pointerdown.prevent="startVisionTest">
-            <span>COMENZAR EVALUACIÓN MÉDICA</span>
+            <span>INICIAR EVALUACIÓN PSICOFÍSICA</span>
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
               <line x1="5" y1="12" x2="19" y2="12"/>
               <polyline points="12 5 19 12 12 19"/>
@@ -786,14 +1067,13 @@ onUnmounted(() => {
         </div>
       </article>
 
-      <!-- PANTALLA 1: PRUEBA DE VISIÓN (OD + OI) -->
+      <!-- PANTALLA 1: PRUEBA DE VISIÓN MONOCULAR (OD + OI) -->
       <article v-if="currentStage === 'vision'" class="view-panel active">
-        
         <!-- FASE DE EXAMEN ACTIVA (OD u OI) -->
         <template v-if="eyePhase === 'test'">
           <div class="panel-header">
             <div class="test-tag">
-              PRUEBA 1 / 3 &bull; AGUDEZA VISUAL
+              PRUEBA 1 / 4 &bull; AGUDEZA VISUAL
               <span class="eye-indicator-pill">
                 {{ currentEye === 'OD' ? 'FASE 1: OJO DERECHO (OD)' : 'FASE 2: OJO IZQUIERDO (OI)' }}
               </span>
@@ -812,10 +1092,10 @@ onUnmounted(() => {
               <line x1="2" y1="2" x2="22" y2="22"/>
             </svg>
             <div v-if="currentEye === 'OD'">
-              <strong>INSTRUCCIÓN CLÍNICA:</strong> Tápese el <strong>OJO IZQUIERDO</strong> con una mano sin presionar el globo ocular. Mire fijamente la pantalla con su <strong>OJO DERECHO</strong>. Tiene 2.5s por intento.
+              <strong>INSTRUCCIÓN CLÍNICA:</strong> Tápese el <strong>OJO IZQUIERDO</strong> con una mano sin presionar el globo ocular. Mire fijamente la pantalla con su <strong>OJO DERECHO</strong>. {{ examMode === 'official' ? 'Tiene 2.5s por intento.' : 'Modo práctica: sin límite de tiempo.' }}
             </div>
             <div v-else>
-              <strong>INSTRUCCIÓN CLÍNICA:</strong> Tápese el <strong>OJO DERECHO</strong> con una mano sin presionar el globo ocular. Mire fijamente la pantalla con su <strong>OJO IZQUIERDO</strong>. Tiene 2.5s por intento.
+              <strong>INSTRUCCIÓN CLÍNICA:</strong> Tápese el <strong>OJO DERECHO</strong> con una mano sin presionar el globo ocular. Mire fijamente la pantalla con su <strong>OJO IZQUIERDO</strong>. {{ examMode === 'official' ? 'Tiene 2.5s por intento.' : 'Modo práctica: sin límite de tiempo.' }}
             </div>
           </div>
 
@@ -823,13 +1103,13 @@ onUnmounted(() => {
             <div class="crosshair-guide"></div>
             <div class="vision-countdown-badge" :class="{ urgent: visionIsUrgent }">Tiempo: {{ visionTimeRemaining }}</div>
             <div class="optotype-container">
-              <svg viewBox="0 0 100 100" class="landolt-ring" :style="{ width: `${currentRoundData.sizePx}px`, height: `${currentRoundData.sizePx}px` }" v-html="currentLandoltSvg"></svg>
+              <svg viewBox="0 0 100 100" class="landolt-ring" :style="{ width: `${currentCalibratedSize}px`, height: `${currentCalibratedSize}px` }" v-html="currentLandoltSvg"></svg>
             </div>
             <div class="snellen-scale-badge">Escala: {{ currentRoundData.snellen }} ({{ currentRoundData.difficulty }})</div>
           </div>
 
           <div class="interaction-hints">
-            <p class="hint-text">Identifique la abertura de la letra C cerrada hacia cuál de las <strong>4 direcciones</strong> apunta:</p>
+            <p class="hint-text">Identifique la hendidura de la letra C cerrada hacia cuál de las <strong>4 direcciones</strong> apunta:</p>
             <div class="dpad-controller">
               <button class="dpad-btn up" @pointerdown.prevent="handleVisionAnswer('up')" title="Apertura hacia Arriba">
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
@@ -870,7 +1150,7 @@ onUnmounted(() => {
                 <path d="M21 3l-6 6M15 3h6v6"/>
               </svg>
             </div>
-            <div class="eye-switch-badge">OJO DERECHO COMPLETADO</div>
+            <div class="eye-switch-badge">OJO DERECHO (OD) COMPLETADO</div>
             <h3>¡Excelente! Ahora cambie de ojo</h3>
             <p>
               Descubra su <strong>ojo izquierdo</strong> y ahora <strong>tápese el ojo derecho</strong> con la mano sin presionar el globo ocular.
@@ -884,13 +1164,56 @@ onUnmounted(() => {
             </button>
           </div>
         </template>
-
       </article>
 
-      <!-- PANTALLA 2: PRUEBA DE AUDIOMETRÍA -->
+      <!-- PANTALLA 2: PRUEBA DE DALTONISMO (ISHIHARA) -->
+      <article v-if="currentStage === 'ishihara'" class="view-panel active">
+        <div class="panel-header">
+          <div class="test-tag">PRUEBA 2 / 4 &bull; DISCRIMINACIÓN CROMÁTICA (ISHIHARA)</div>
+          <div class="round-tracker">
+            <span>Lámina:</span>
+            <strong>{{ ishiharaRound + 1 }} / {{ ishiharaTotalRounds }}</strong>
+          </div>
+        </div>
+
+        <div class="instruction-banner info-banner">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="16" x2="12" y2="12"/>
+            <line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          <div>
+            <strong>INSTRUCCIÓN CLÍNICA:</strong> Observe la lámina circular e indique qué número percibe con claridad. {{ examMode === 'official' ? 'Tiene 6 segundos.' : 'Modo práctica sin tiempo.' }}
+          </div>
+        </div>
+
+        <div class="ishihara-stage">
+          <div class="ishihara-plate-container">
+            <svg viewBox="0 0 100 100" class="ishihara-svg" v-html="currentIshiharaSvg"></svg>
+          </div>
+          <div class="vision-countdown-badge">Tiempo: {{ ishiharaTimeRemaining }}</div>
+          <p class="hint-text">Seleccione el número que ve dentro de los puntos de la lámina:</p>
+          <div class="ishihara-options-grid">
+            <button 
+              v-for="opt in currentIshiharaPlate.options" 
+              :key="opt"
+              class="ishihara-option-btn"
+              @pointerdown.prevent="handleIshiharaAnswer(opt)"
+            >
+              {{ opt }}
+            </button>
+          </div>
+        </div>
+
+        <div class="round-progress-bar">
+          <div class="progress-fill" :style="{ width: `${((ishiharaRound + 1) / ishiharaTotalRounds) * 100}%` }"></div>
+        </div>
+      </article>
+
+      <!-- PANTALLA 3: AUDIOMETRÍA A CIEGAS (2.0s) -->
       <article v-if="currentStage === 'audio'" class="view-panel active">
         <div class="panel-header">
-          <div class="test-tag">PRUEBA 2 / 3 &bull; LOCALIZACIÓN AUDITIVA (A CIEGAS)</div>
+          <div class="test-tag">PRUEBA 3 / 4 &bull; LOCALIZACIÓN AUDITIVA (A CIEGAS)</div>
           <div class="round-tracker">
             <span>Intento:</span>
             <strong>{{ audioRound + 1 }} / {{ audioTotalRounds }}</strong>
@@ -904,7 +1227,7 @@ onUnmounted(() => {
             <line x1="12" y1="8" x2="12.01" y2="8"/>
           </svg>
           <div>
-            <strong>INSTRUCCIÓN CLÍNICA:</strong> Escuche con atención sus audífonos. <strong>La pantalla NO indicará de qué lado suena.</strong> Tiene exactamente <strong>2 segundos</strong> para responder: [← Izquierda], [→ Derecha] o [ESPACIO] si no escucha nada.
+            <strong>INSTRUCCIÓN CLÍNICA:</strong> Escuche con atención sus audífonos. <strong>La pantalla NO indicará de qué lado suena.</strong> {{ examMode === 'official' ? 'Tiene exactamente 2.0s para responder.' : 'Modo práctica sin tiempo.' }}
           </div>
         </div>
 
@@ -969,10 +1292,10 @@ onUnmounted(() => {
         </div>
       </article>
 
-      <!-- PANTALLA 3: PRUEBA DE REFLEJOS -->
+      <!-- PANTALLA 4: PRUEBA DE REFLEJOS & SEMÁFORO (2.0s) -->
       <article v-if="currentStage === 'reaction'" class="view-panel active">
         <div class="panel-header">
-          <div class="test-tag">PRUEBA 3 / 3 &bull; TIEMPO DE REACCIÓN CROMÁTICO</div>
+          <div class="test-tag">PRUEBA 4 / 4 &bull; TIEMPO DE REACCIÓN CROMÁTICO</div>
           <div class="round-tracker">
             <span>Aciertos:</span>
             <strong>{{ reactionSuccessCount }} / {{ reactionTargetCount }}</strong>
@@ -986,7 +1309,7 @@ onUnmounted(() => {
             <line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
           <div>
-            <strong>INSTRUCCIÓN CLÍNICA:</strong> Tiene un límite estricto de <strong>2 segundos</strong> para tocar o presionar [ESPACIO] al ver el círculo <strong>VERDE</strong>. ¡NO toque si es Rojo, Amarillo ni Azul!
+            <strong>INSTRUCCIÓN CLÍNICA:</strong> Presione el pulsador táctil o [ESPACIO] <strong>únicamente ante el círculo VERDE</strong>. No toque en Rojo, Amarillo ni Azul.
           </div>
         </div>
 
@@ -1022,7 +1345,7 @@ onUnmounted(() => {
                 <kbd class="space-kbd">ESPACIO O TOQUE</kbd>
               </div>
               <span class="touch-highlight-text">¡PULSAR / TOCAR AL VER VERDE!</span>
-              <small class="touch-subtext">Respuesta instantánea para móvil y PC</small>
+              <small class="touch-subtext">Respuesta táctil instantánea de cero latencia</small>
             </button>
           </div>
         </div>
@@ -1032,8 +1355,8 @@ onUnmounted(() => {
         </div>
       </article>
 
-      <!-- PANTALLA 4: RESULTADOS -->
-      <article v-if="currentStage === 'results'" class="view-panel active">
+      <!-- PANTALLA 5: INFORME Y DICTAMEN MÉDICO FINAL -->
+      <article v-if="currentStage === 'results'" id="viewResults" class="view-panel active">
         <div class="results-header">
           <div class="official-crest">
             <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -1042,8 +1365,8 @@ onUnmounted(() => {
             </svg>
           </div>
           <h2>INFORME DE APTITUD PSICOFÍSICA PARA CONDUCCIÓN</h2>
-          <p class="results-sub">Simulación Clínica de Evaluación Sensorial y Perceptiva &bull; Conforme al protocolo INTRANT</p>
-          <div class="evaluation-date">{{ currentDateFormatted }}</div>
+          <p class="results-sub">Simulación Clínica de Evaluación Sensorial y Perceptiva &bull; Normativa INTRANT</p>
+          <div class="evaluation-date">{{ currentDateFormatted }} &bull; Folio: <strong>{{ sessionReportId }}</strong></div>
         </div>
 
         <div class="verdict-banner" :class="verdictClass">
@@ -1059,14 +1382,15 @@ onUnmounted(() => {
             </svg>
           </div>
           <div class="verdict-text-block">
-            <span class="verdict-title">DICTAMEN FINAL:</span>
+            <span class="verdict-title">DICTAMEN MÉDICO FINAL:</span>
             <strong class="verdict-outcome">{{ verdictOutcome }}</strong>
             <p class="verdict-observation">{{ verdictNotes }}</p>
           </div>
         </div>
 
+        <!-- Rejilla de Métricas Principales -->
         <div class="metrics-summary-grid">
-          <!-- Visión Monocular Bilateral -->
+          <!-- Visión Monocular -->
           <div class="metric-card">
             <div class="mcard-top">
               <span class="mcard-title">1. Agudeza Visual (OD + OI)</span>
@@ -1076,40 +1400,52 @@ onUnmounted(() => {
             <div class="mcard-detail">
               OD: <strong>{{ bestSnellenOD }}</strong> &bull; OI: <strong>{{ bestSnellenOI }}</strong>
             </div>
-            <p class="mcard-eval">Evaluación monocular independiente con letra C cerrada y hendidura fina.</p>
+            <p class="mcard-eval">Evaluación monocular bilateral independiente con letra C cerrada y hendidura fina.</p>
+          </div>
+
+          <!-- Daltonismo / Ishihara -->
+          <div class="metric-card">
+            <div class="mcard-top">
+              <span class="mcard-title">2. Visión Cromática (Ishihara)</span>
+              <span class="mcard-badge">{{ ishiharaPct }}%</span>
+            </div>
+            <div class="mcard-value">{{ ishiharaHits }} / {{ ishiharaTotalRounds }}</div>
+            <div class="mcard-detail">Percepción rojo-verde: <strong>{{ ishiharaHits >= 2 ? 'Normal' : 'Deficiente' }}</strong></div>
+            <p class="mcard-eval">Discriminación cromática estandarizada para señales de tránsito.</p>
           </div>
 
           <!-- Audiometría a Ciegas -->
           <div class="metric-card">
             <div class="mcard-top">
-              <span class="mcard-title">2. Audiometría Estéreo</span>
+              <span class="mcard-title">3. Audiometría Estéreo</span>
               <span class="mcard-badge">{{ audioPct }}%</span>
             </div>
             <div class="mcard-value">{{ audioHits }} / {{ audioTotalRounds }}</div>
-            <div class="mcard-detail">Percepción a ciegas: <strong>{{ audioHits >= 4 ? 'Normal' : 'Déficit' }}</strong></div>
+            <div class="mcard-detail">Localización a ciegas: <strong>{{ audioHits >= 3 ? 'Apta' : 'Déficit' }}</strong></div>
             <p class="mcard-eval">Discriminación acústica sin pistas visuales en ventana de 2.0s.</p>
           </div>
 
           <!-- Reflejo y Reacción -->
           <div class="metric-card">
             <div class="mcard-top">
-              <span class="mcard-title">3. Reflejo & Reacción</span>
+              <span class="mcard-title">4. Reflejo & Reactimetría</span>
               <span class="mcard-badge">{{ currentAvgMs }} ms</span>
             </div>
             <div class="mcard-value">{{ reactionSuccessCount }} Aciertos</div>
-            <div class="mcard-detail">Falsas alarmas: <strong>{{ reactionFalseAlarms }} fallos</strong></div>
-            <p class="mcard-eval">Velocidad refleja psicomotriz ante el estímulo verde (&lt;2.0s).</p>
+            <div class="mcard-detail">Falsas alarmas: <strong>{{ reactionFalseAlarms }}</strong></div>
+            <p class="mcard-eval">Tiempo de respuesta psicomotriz ante el estímulo verde (&lt;2.0s).</p>
           </div>
         </div>
 
+        <!-- Tabla Desglosada de Resultados -->
         <div class="detailed-breakdown">
-          <h3>Detalle Clínico de Intentos</h3>
+          <h3>Detalle Clínico de Intentos Realizados</h3>
           <div class="table-responsive">
             <table class="report-table">
               <thead>
                 <tr>
                   <th>Prueba</th>
-                  <th>Ojo / Canal</th>
+                  <th>Canal / Ojo</th>
                   <th>Intento</th>
                   <th>Estímulo</th>
                   <th>Respuesta</th>
@@ -1127,9 +1463,18 @@ onUnmounted(() => {
                   <td><span :class="r.isCorrect ? 'tag-success' : 'tag-fail'">{{ r.isCorrect ? 'ACIERTO' : 'FALLO' }}</span></td>
                   <td>{{ r.timeMs ? `${r.timeMs} ms (${r.snellen})` : r.snellen }}</td>
                 </tr>
+                <tr v-for="(p, idx) in ishiharaResults" :key="'ish-' + idx">
+                  <td><strong>Daltonismo (Ishihara)</strong></td>
+                  <td>Binocular</td>
+                  <td>Lámina {{ p.plateId }}</td>
+                  <td>Dígito {{ p.expected }}</td>
+                  <td>{{ p.given }}</td>
+                  <td><span :class="p.isCorrect ? 'tag-success' : 'tag-fail'">{{ p.isCorrect ? 'ACIERTO' : 'FALLO' }}</span></td>
+                  <td>{{ p.isCorrect ? 'Normal' : 'Alteración' }}</td>
+                </tr>
                 <tr v-for="r in audioResults" :key="'aud-' + r.round">
                   <td><strong>Audiometría A Ciegas</strong></td>
-                  <td>Bilateral</td>
+                  <td>Estéreo Bilateral</td>
                   <td>Ronda {{ r.round }}</td>
                   <td>{{ r.targetLabel }}</td>
                   <td>{{ r.givenLabel }}</td>
@@ -1141,7 +1486,7 @@ onUnmounted(() => {
                   <td>Cromático</td>
                   <td>Evento {{ idx + 1 }}</td>
                   <td>Color {{ h.color }}</td>
-                  <td>Toque Táctil / Espacio</td>
+                  <td>Toque / Barra Espacio</td>
                   <td><span :class="h.color === 'Verde' ? 'tag-success' : 'tag-fail'">{{ h.color === 'Verde' ? 'ACERTADO' : 'PENALIZADO' }}</span></td>
                   <td>{{ h.reactionMs > 0 ? `${h.reactionMs} ms` : h.outcome }}</td>
                 </tr>
@@ -1155,7 +1500,7 @@ onUnmounted(() => {
             <circle cx="12" cy="12" r="10"/>
             <path d="M12 16v-4M12 8h.01"/>
           </svg>
-          <span><strong>Recordatorio de Privacidad:</strong> Esta sesión es 100% volátil en Vue 3. Ningún resultado, dato personal ni estadística se envía a ningún servidor ni se almacena en memoria permanente.</span>
+          <span><strong>Recordatorio de Privacidad:</strong> Esta sesión es 100% volátil en memoria. Ningún dato personal, resultado o registro se almacena en base de datos ni se comparte externamente.</span>
         </div>
 
         <div class="results-actions-bar">
@@ -1165,7 +1510,7 @@ onUnmounted(() => {
               <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
               <rect x="6" y="14" width="12" height="8"/>
             </svg>
-            Imprimir / Guardar PDF
+            Imprimir / Guardar en PDF
           </button>
           <button type="button" class="btn-primary-action" @click="resetAllTests">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
@@ -1177,6 +1522,72 @@ onUnmounted(() => {
       </article>
 
     </section>
+
+    <!-- MODAL 1: CALIBRADOR DE PANTALLA EN MILÍMETROS -->
+    <div v-if="showCalibrationModal" class="clinical-modal-overlay" @click.self="showCalibrationModal = false">
+      <div class="clinical-modal-card">
+        <div class="modal-header-row">
+          <h3>Calibración de Escala Física (mm)</h3>
+          <button class="modal-close-btn" @click="showCalibrationModal = false" aria-label="Cerrar modal">&times;</button>
+        </div>
+        <p class="modal-subtext">
+          Para que el tamaño de las letras C en la prueba de agudeza visual corresponda con exactitud a la distancia reglamentaria, coloque una <strong>cédula de identidad</strong> o <strong>tarjeta de crédito</strong> sobre el recuadro y ajuste el deslizador hasta que coincidan exactamente:
+        </p>
+        <div class="calibration-card-sim" :style="{ width: `${calibrationCardWidth}px` }">
+          <span>85.60 mm (Estándar Cédula / Tarjeta)</span>
+        </div>
+        <div class="slider-ctrl-row">
+          <label>Ajuste de ancho en pantalla: <strong>{{ calibrationCardWidth }} px</strong></label>
+          <input type="range" min="240" max="440" step="1" v-model.number="calibrationCardWidth">
+        </div>
+        <button class="btn-primary-action" @click="showCalibrationModal = false">
+          <span>GUARDAR CALIBRACIÓN</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- MODAL 2: REQUISITOS OFICIALES & CONSEJOS INTRANT -->
+    <div v-if="showAdviceModal" class="clinical-modal-overlay" @click.self="showAdviceModal = false">
+      <div class="clinical-modal-card">
+        <div class="modal-header-row">
+          <h3>Requisitos & Consejos para el Examen INTRANT</h3>
+          <button class="modal-close-btn" @click="showAdviceModal = false" aria-label="Cerrar modal">&times;</button>
+        </div>
+        <div class="advice-list">
+          <div class="advice-item">
+            <span class="advice-badge-num">1</span>
+            <div class="advice-content">
+              <h5>Documentos Obligatorios</h5>
+              <p>Cédula de Identidad y Electoral dominicana física y vigente, comprobante de pago de impuestos emitido por el Banco de Reservas (Banreservas), y certificado de no antecedentes penales.</p>
+            </div>
+          </div>
+          <div class="advice-item">
+            <span class="advice-badge-num">2</span>
+            <div class="advice-content">
+              <h5>Uso de Lentes o Cristales Correctores</h5>
+              <p>Si usa anteojos o lentes de contacto recetados por un oftalmólogo u optometrista, llévelos obligatoriamente. En el examen se le permitirá realizar la prueba con ellos puestos y su licencia llevará impresa la restricción legal <strong>"01: Usa Lentes"</strong>.</p>
+            </div>
+          </div>
+          <div class="advice-item">
+            <span class="advice-badge-num">3</span>
+            <div class="advice-content">
+              <h5>Descanso previo & Evitar Cafeína en exceso</h5>
+              <p>Duerma al menos 7 a 8 horas la noche anterior. Evite consumir bebidas energizantes o café en exceso justo antes de la evaluación, ya que incrementan el temblor y provocan falsas alarmas por anticipación en el reactímetro.</p>
+            </div>
+          </div>
+          <div class="advice-item">
+            <span class="advice-badge-num">4</span>
+            <div class="advice-content">
+              <h5>Protocolo durante la prueba médica</h5>
+              <p>Al taparse un ojo en el optotipo, hágalo con la palma en forma de copa o un oclusor sin presionar el ojo contra la órbita, para no empañar la visión cuando le toque evaluarlo.</p>
+            </div>
+          </div>
+        </div>
+        <button class="btn-primary-action" @click="showAdviceModal = false">
+          <span>ENTENDIDO, VOLVER</span>
+        </button>
+      </div>
+    </div>
 
     <!-- Toast flotante reactivo -->
     <div class="toast-feedback" :class="[{ visible: toastVisible }, `toast-${toastType}`]" role="status" aria-live="polite">
