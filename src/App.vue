@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { getAudioContext, playAudiometryTone, playFeedbackSound, testStereoChannels } from './audio.js';
+import { getAudioContext, playAudiometryTone, playFeedbackSound, testStereoChannels, areChannelsInverted, setChannelsInverted } from './audio.js';
 import { VISION_ROUNDS, ORIENTATIONS, renderLandoltSvg } from './landolt.js';
 import { REACTION_COLORS } from './colorReaction.js';
 import { ISHIHARA_PLATES, generateIshiharaSvg } from './ishihara.js';
@@ -377,6 +377,36 @@ let audioTimeoutId = null;
 let audioCountdownInterval = null;
 let audioStartTime = 0;
 
+const isTestingStereo = ref(false);
+const channelsInvertedState = ref(areChannelsInverted());
+
+function toggleChannelsInverted() {
+  setChannelsInverted(!channelsInvertedState.value);
+  channelsInvertedState.value = areChannelsInverted();
+  if (channelsInvertedState.value) {
+    showToast('Canales estéreo invertidos (Izquierda ⇄ Derecha).', 'info');
+  } else {
+    showToast('Canales estéreo restaurados a estándar.', 'info');
+  }
+}
+
+async function handleStereoTestClick() {
+  if (isTestingStereo.value) return;
+  isTestingStereo.value = true;
+  showToast('Iniciando calibración: Escuche primero el audífono izquierdo y luego el derecho.', 'info');
+
+  await testStereoChannels((step) => {
+    if (step === 'left') {
+      showToast('🔊 Sonando ahora: AUDÍFONO IZQUIERDO (L)...', 'info');
+    } else if (step === 'right') {
+      showToast('🔊 Sonando ahora: AUDÍFONO DERECHO (R)...', 'info');
+    } else if (step === 'done') {
+      showToast('✅ Calibración finalizada. Si sonó en el oído opuesto, use el botón "Invertir Canales".', 'success');
+      isTestingStereo.value = false;
+    }
+  });
+}
+
 function clearAudioTimers() {
   if (audioTimeoutId) {
     clearTimeout(audioTimeoutId);
@@ -388,16 +418,20 @@ function clearAudioTimers() {
   }
 }
 
-function startAudioTest() {
+async function startAudioTest() {
   currentStage.value = 'audio';
   audioRound.value = 0;
   audioResults.value = [];
   isAudioWaiting.value = false;
 
-  speakInstruction('Prueba de audiometría a ciegas. Use audífonos. Indique si escucha por el lado izquierdo, por el derecho, o si hay silencio.');
-
   const pool = ['left', 'right', 'none', 'left', 'right'];
   audioSequence.value = pool.sort(() => Math.random() - 0.5);
+
+  audioStateLabel.value = 'Instrucción clínica...';
+  speakInstruction('Prueba de audiometría a ciegas. Use audífonos. Indique si escucha por el lado izquierdo, por el derecho, o si hay silencio.');
+
+  // Espera para no solapar la locución clínica con el primer tono
+  await new Promise(r => setTimeout(r, 3800));
 
   nextAudioRound();
 }
@@ -410,6 +444,11 @@ async function nextAudioRound() {
 
   clearAudioTimers();
   isAudioWaiting.value = false;
+
+  // Detener cualquier síntesis de voz residual para garantizar silencio clínico
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
 
   audioTimeRemaining.value = examMode.value === 'official' ? '2.0s' : 'Libre';
   audioIsUrgent.value = false;
@@ -1045,15 +1084,32 @@ onUnmounted(() => {
         <div class="hardware-check-box">
           <div class="check-item">
             <span class="check-badge">Bilateral</span>
-            <span>Evaluación monocular independiente con escala Snellen calibrada.</span>
+            <span>Evaluación monocular independiente y audiometría calibrada L/R.</span>
           </div>
-          <button type="button" class="btn-sound-test" @pointerdown.prevent="testStereoChannels">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-            </svg>
-            Probar Audífonos Estéreo
-          </button>
+          <div class="sound-check-actions">
+            <button type="button" class="btn-sound-test" :disabled="isTestingStereo" @pointerdown.prevent="handleStereoTestClick">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+              </svg>
+              {{ isTestingStereo ? 'Emitiendo Pruebas L/R...' : 'Probar Audífonos Estéreo' }}
+            </button>
+            <button 
+              type="button" 
+              class="btn-invert-channels" 
+              :class="{ active: channelsInvertedState }"
+              @pointerdown.prevent="toggleChannelsInverted"
+              title="Invertir los canales de audífono si escucha en el lado contrario"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="17 1 21 5 17 9"/>
+                <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+                <polyline points="7 23 3 19 7 15"/>
+                <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+              </svg>
+              <span>{{ channelsInvertedState ? 'Canales: Invertidos (L⇄R)' : 'Invertir Canales L/R' }}</span>
+            </button>
+          </div>
         </div>
 
         <div class="action-footer">
@@ -1229,6 +1285,30 @@ onUnmounted(() => {
           <div>
             <strong>INSTRUCCIÓN CLÍNICA:</strong> Escuche con atención sus audífonos. <strong>La pantalla NO indicará de qué lado suena.</strong> {{ examMode === 'official' ? 'Tiene exactamente 2.0s para responder.' : 'Modo práctica sin tiempo.' }}
           </div>
+        </div>
+
+        <div class="audio-stage-tools">
+          <button 
+            type="button" 
+            class="tool-chip-btn-sm" 
+            :class="{ active: channelsInvertedState }"
+            @pointerdown.prevent="toggleChannelsInverted"
+            title="Invertir canales izquierdo y derecho"
+          >
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+              <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+            </svg>
+            <span>{{ channelsInvertedState ? 'Canales: Invertidos (L⇄R)' : 'Canales: Estándar (L/R)' }}</span>
+          </button>
+          <button 
+            type="button" 
+            class="tool-chip-btn-sm" 
+            :disabled="isTestingStereo"
+            @pointerdown.prevent="handleStereoTestClick"
+          >
+            🔊 Probar Oídos (L/R)
+          </button>
         </div>
 
         <div class="audio-stage">

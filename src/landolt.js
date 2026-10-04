@@ -31,10 +31,12 @@ export function renderLandoltSvg(orientationId, sizePx) {
   // Centro en (50, 50), radio central 32, grosor de trazo 24
   // Radio interior = 32 - 12 = 20 (orificio interior cerrado)
   // Perímetro = 2 * PI * 32 = 201.06
-  // Hendidura estrecha ("más cerradita") de 14 unidades
+  // Hendidura estrecha ("más cerradita") de 14 unidades centrada a las 3 en punto (derecha)
   const circ = 2 * Math.PI * 32;
   const gap = 14;
   const dashLength = (circ - gap).toFixed(2);
+  // Al desplazar por (circ - gap / 2), el centro de la hendidura queda en 0 rad (3 en punto / Derecha)
+  const dashOffset = (circ - (gap / 2)).toFixed(2);
 
   return `
     <g transform="rotate(${angle} 50 50)">
@@ -46,7 +48,7 @@ export function renderLandoltSvg(orientationId, sizePx) {
         stroke="#0f172a" 
         stroke-width="24"
         stroke-dasharray="${dashLength} ${gap}"
-        stroke-dashoffset="${(circ - gap) / 2}"
+        stroke-dashoffset="${dashOffset}"
         stroke-linecap="butt"
       />
     </g>
