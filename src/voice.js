@@ -3,7 +3,7 @@
 // ==========================================================================
 
 let isSpeechAvailable = typeof window !== 'undefined' && 'speechSynthesis' in window;
-let isMuted = false;
+let isMuted = true; // Silenciado por defecto para evitar sobreposición y molestias acústicas
 
 export function setVoiceMuted(muted) {
   isMuted = muted;

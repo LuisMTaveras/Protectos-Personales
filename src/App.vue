@@ -10,8 +10,46 @@ import { speakInstruction, setVoiceMuted, isVoiceMuted } from './voice.js';
 // CONFIGURACIÓN GLOBAL & ESTADOS
 // ==========================================================================
 const currentStage = ref('intro'); // 'intro' | 'vision' | 'ishihara' | 'audio' | 'reaction' | 'results'
+const stagePhase = ref('briefing'); // 'briefing' | 'active'
 const examMode = ref('official'); // 'official' (con límites estrictos) | 'practice' (pedagógico sin tiempo)
-const voiceActive = ref(true);
+const voiceActive = ref(false); // Silenciado y desactivado por defecto
+
+// Helpers adaptativos de progreso para navegación móvil y desktop
+const currentStageStepNumber = computed(() => {
+  switch (currentStage.value) {
+    case 'intro': return 0;
+    case 'vision': return 1;
+    case 'ishihara': return 2;
+    case 'audio': return 3;
+    case 'reaction': return 4;
+    case 'results': return 5;
+    default: return 0;
+  }
+});
+
+const currentStageBadgeText = computed(() => {
+  switch (currentStage.value) {
+    case 'intro': return 'Paso 0 de 4 • Inicio y Calibración';
+    case 'vision': return currentEye.value === 'OD' ? 'Paso 1 de 4 • Agudeza Ojo Derecho' : 'Paso 1 de 4 • Agudeza Ojo Izquierdo';
+    case 'ishihara': return 'Paso 2 de 4 • Visión Cromática (Ishihara)';
+    case 'audio': return 'Paso 3 de 4 • Audiometría a Ciegas';
+    case 'reaction': return 'Paso 4 de 4 • Reflejos & Frenado';
+    case 'results': return 'Dictamen Oficial Final';
+    default: return '';
+  }
+});
+
+const currentProgressPercent = computed(() => {
+  switch (currentStage.value) {
+    case 'intro': return 5;
+    case 'vision': return currentEye.value === 'OD' ? 20 : 35;
+    case 'ishihara': return 55;
+    case 'audio': return 75;
+    case 'reaction': return 90;
+    case 'results': return 100;
+    default: return 0;
+  }
+});
 
 // Modales interactivos
 const showCalibrationModal = ref(false);
@@ -110,13 +148,18 @@ function startVisionTest() {
   currentStage.value = 'vision';
   currentEye.value = 'OD';
   eyePhase.value = 'test';
+  stagePhase.value = 'briefing';
   visionRound.value = 0;
   visionResultsOD.value = [];
   visionResultsOI.value = [];
   isVisionWaiting.value = false;
+}
 
-  speakInstruction('Iniciando prueba de agudeza visual. Tápese el ojo izquierdo con una mano sin presionar el globo ocular. Indique la dirección de la abertura de la letra C.');
-
+function beginActiveVisionTest() {
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+  stagePhase.value = 'active';
   prepareEyeSequence();
   nextVisionRound();
 }
@@ -133,7 +176,6 @@ function nextVisionRound() {
       clearVisionTimers();
       isVisionWaiting.value = false;
       eyePhase.value = 'transition';
-      speakInstruction('Fase de ojo derecho completada. Ahora destape su ojo izquierdo y tápese el ojo derecho.');
       showToast('Ojo Derecho completado. Cambie de ojo.', 'info');
       return;
     } else {
@@ -160,11 +202,13 @@ function nextVisionRound() {
 }
 
 function continueWithLeftEye() {
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
   currentEye.value = 'OI';
   eyePhase.value = 'test';
   visionRound.value = 0;
   prepareEyeSequence();
-  speakInstruction('Iniciando evaluación de ojo izquierdo. Indique hacia dónde apunta la abertura.');
   nextVisionRound();
 }
 
@@ -286,11 +330,17 @@ function clearIshiharaTimers() {
 
 function startIshiharaTest() {
   currentStage.value = 'ishihara';
+  stagePhase.value = 'briefing';
   ishiharaRound.value = 0;
   ishiharaResults.value = [];
   ishiharaWaiting.value = false;
+}
 
-  speakInstruction('Prueba de discriminación de colores de Ishihara. Identifique el número oculto en la lámina circular y selecciónelo abajo.');
+function beginActiveIshiharaTest() {
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+  stagePhase.value = 'active';
   nextIshiharaRound();
 }
 
@@ -418,21 +468,22 @@ function clearAudioTimers() {
   }
 }
 
-async function startAudioTest() {
+function startAudioTest() {
   currentStage.value = 'audio';
+  stagePhase.value = 'briefing';
   audioRound.value = 0;
   audioResults.value = [];
   isAudioWaiting.value = false;
 
   const pool = ['left', 'right', 'none', 'left', 'right'];
   audioSequence.value = pool.sort(() => Math.random() - 0.5);
+}
 
-  audioStateLabel.value = 'Instrucción clínica...';
-  speakInstruction('Prueba de audiometría a ciegas. Use audífonos. Indique si escucha por el lado izquierdo, por el derecho, o si hay silencio.');
-
-  // Espera para no solapar la locución clínica con el primer tono
-  await new Promise(r => setTimeout(r, 3800));
-
+function beginActiveAudioTest() {
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+  stagePhase.value = 'active';
   nextAudioRound();
 }
 
@@ -594,7 +645,8 @@ function clearReactionTimers() {
 
 function startReactionTest() {
   currentStage.value = 'reaction';
-  isReactionRunning = true;
+  stagePhase.value = 'briefing';
+  isReactionRunning = false;
   reactionSuccessCount.value = 0;
   reactionFalseAlarms.value = 0;
   lastReactionMs.value = '--';
@@ -603,9 +655,14 @@ function startReactionTest() {
   currentColor.value = null;
   reactionTimeRemaining.value = examMode.value === 'official' ? '2.0s' : 'Libre';
   reactionIsUrgent.value = false;
+}
 
-  speakInstruction('Prueba de tiempo de reacción. Presione el pulsador o la barra espaciadora únicamente cuando vea el círculo verde.');
-
+function beginActiveReactionTest() {
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+  stagePhase.value = 'active';
+  isReactionRunning = true;
   scheduleNextStimulus();
 }
 
@@ -742,8 +799,6 @@ function finishReactionTest() {
   isReactionRunning = false;
   clearReactionTimers();
   currentStage.value = 'results';
-
-  speakInstruction(isApproved.value ? 'Evaluación finalizada con éxito. Postulante cumple con los criterios reglamentarios.' : 'Evaluación finalizada. Uno o más parámetros requieren atención o revaloración.');
 }
 
 // ==========================================================================
@@ -843,6 +898,16 @@ function onKeydown(e) {
   }
   activeKey.value = e.key;
 
+  if (stagePhase.value === 'briefing') {
+    if (e.key === 'Enter') {
+      if (currentStage.value === 'vision') beginActiveVisionTest();
+      else if (currentStage.value === 'ishihara') beginActiveIshiharaTest();
+      else if (currentStage.value === 'audio') beginActiveAudioTest();
+      else if (currentStage.value === 'reaction') beginActiveReactionTest();
+    }
+    return;
+  }
+
   if (currentStage.value === 'vision' && eyePhase.value === 'test') {
     if (e.key === 'ArrowUp') handleVisionAnswer('up');
     else if (e.key === 'ArrowDown') handleVisionAnswer('down');
@@ -887,108 +952,75 @@ onUnmounted(() => {
   <div class="clinical-grid-backdrop"></div>
 
   <main class="app-container">
-    <!-- Barra Superior de Telemetría y Controles del Sistema -->
-    <aside class="top-system-toolbar" aria-label="Controles del sistema de diagnóstico">
-      <div class="system-status-indicator">
-        <span class="status-beacon"></span>
-        <span>SISTEMA PSICOFÍSICO EN LÍNEA &bull; MEMORIA VOLÁTIL</span>
-      </div>
-
-      <div class="toolbar-controls">
-        <!-- Toggle Modo de Examen -->
-        <button 
-          type="button" 
-          class="tool-chip-btn" 
-          :class="{ active: examMode === 'official' }"
-          @click="setExamMode(examMode === 'official' ? 'practice' : 'official')"
-          title="Cambiar entre Examen Oficial (con límite de tiempo) y Modo Práctica"
-        >
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <polyline points="12 6 12 12 16 14"/>
-          </svg>
-          <span>{{ examMode === 'official' ? 'Modo: Oficial (Estricto)' : 'Modo: Práctica Libre' }}</span>
-        </button>
-
-        <!-- Toggle Voz Asistente -->
-        <button 
-          type="button" 
-          class="tool-chip-btn" 
-          :class="{ active: voiceActive }"
-          @click="toggleVoice"
-          title="Activar o silenciar instrucciones por voz clínica"
-        >
-          <svg v-if="voiceActive" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
-          </svg>
-          <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-            <line x1="23" y1="9" x2="17" y2="15"/>
-            <line x1="17" y1="9" x2="23" y2="15"/>
-          </svg>
-          <span>{{ voiceActive ? 'Voz: Activa' : 'Voz: Silenciada' }}</span>
-        </button>
-
-        <!-- Botón Calibración mm -->
-        <button 
-          type="button" 
-          class="tool-chip-btn" 
-          @click="showCalibrationModal = true"
-          title="Ajustar tamaño en milímetros con tarjeta de crédito o cédula"
-        >
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="2" y="5" width="20" height="14" rx="2"/>
-            <line x1="2" y1="10" x2="22" y2="10"/>
-          </svg>
-          <span>Calibrar Pantalla</span>
-        </button>
-
-        <!-- Botón Consejos INTRANT -->
-        <button 
-          type="button" 
-          class="tool-chip-btn" 
-          @click="showAdviceModal = true"
-          title="Requisitos oficiales y recomendaciones para el examen"
-        >
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="16" x2="12" y2="12"/>
-            <line x1="12" y1="8" x2="12.01" y2="8"/>
-          </svg>
-          <span>Requisitos INTRANT</span>
-        </button>
-      </div>
-    </aside>
-
-    <!-- Encabezado Institucional INTRANT -->
-    <header class="official-header">
-      <div class="brand-group">
-        <div class="seal-badge">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+    <!-- 1. BARRA DE NAVEGACIÓN SUPERIOR (UNIFICADA & COMPACTA) -->
+    <header class="app-navbar">
+      <div class="navbar-brand">
+        <div class="brand-crest-glow">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2">
             <path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z"/>
             <path d="M9 12l2 2 4-4"/>
           </svg>
-          <span>REPÚBLICA DOMINICANA &bull; UNIDAD DE DIAGNÓSTICO CONDUCTORES</span>
         </div>
-        <h1 class="system-title">SIMULADOR PSICOFÍSICO <span>INTRANT</span></h1>
+        <div class="brand-text-col">
+          <div class="brand-subline">
+            <span class="live-status-dot"></span>
+            <span>REPÚBLICA DOMINICANA &bull; PROTOCOLO OFICIAL</span>
+          </div>
+          <h1 class="brand-title">SIMULADOR PSICOFÍSICO <span>INTRANT</span></h1>
+        </div>
       </div>
-      <div class="header-badges-cluster">
-        <div class="badge-tag" :class="examMode === 'official' ? 'mode-official' : 'mode-practice'">
-          {{ examMode === 'official' ? 'Examen Oficial (Tiempos Estrictos)' : 'Modo Práctica Libre' }}
+
+      <div class="navbar-actions">
+        <!-- Selector de Modo Oficial vs Práctica -->
+        <div class="mode-pill-toggle" role="group" aria-label="Modo de examen">
+          <button 
+            type="button" 
+            class="mode-pill-opt" 
+            :class="{ active: examMode === 'official' }" 
+            @click="setExamMode('official')"
+            title="Modo Oficial: Tiempos límite estrictos"
+          >
+            <span class="pill-dot"></span> Oficial
+          </button>
+          <button 
+            type="button" 
+            class="mode-pill-opt" 
+            :class="{ active: examMode === 'practice' }" 
+            @click="setExamMode('practice')"
+            title="Modo Práctica: Sin límite de tiempo"
+          >
+            Práctica
+          </button>
         </div>
-        <div class="badge-tag privacy">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+
+        <button 
+          type="button" 
+          class="nav-icon-btn" 
+          @click="showCalibrationModal = true"
+          title="Calibrar tamaño en pantalla con cédula o tarjeta"
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>
           </svg>
-          <span>100% Privado en Memoria</span>
-        </div>
+          <span class="btn-text-desktop">Calibrar</span>
+        </button>
+
+        <button 
+          type="button" 
+          class="nav-icon-btn" 
+          @click="showAdviceModal = true"
+          title="Requisitos oficiales y normativas del INTRANT"
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          <span class="btn-text-desktop">Normativa</span>
+        </button>
       </div>
     </header>
 
-    <!-- Stepper de Fases (6 etapas completas) -->
-    <nav class="phase-stepper" aria-label="Progreso de evaluación psicofísica">
+    <!-- 2. STEPPER DESKTOP (CHIPS CONECTADOS) -->
+    <nav class="phase-stepper-desktop" aria-label="Progreso del examen">
       <div class="step-node" :class="{ active: currentStage === 'intro', completed: currentStage !== 'intro' }">
         <span class="step-num">0</span>
         <span class="step-label">Inicio</span>
@@ -1019,6 +1051,20 @@ onUnmounted(() => {
         <span class="step-label">Dictamen</span>
       </div>
     </nav>
+
+    <!-- 2b. STEPPER MOBILE (BARRA ULTRA-COMPACTA ESPACIO EFICIENTE) -->
+    <div class="phase-stepper-mobile" aria-label="Progreso en móvil">
+      <div class="mobile-step-meta">
+        <span class="mstep-badge">
+          <span class="live-status-dot"></span>
+          {{ currentStageBadgeText }}
+        </span>
+        <span class="mstep-percent">{{ currentProgressPercent }}%</span>
+      </div>
+      <div class="mobile-step-track">
+        <div class="mobile-step-fill" :style="{ width: `${currentProgressPercent}%` }"></div>
+      </div>
+    </div>
 
     <!-- Contenedor Principal de Pantallas -->
     <section class="test-viewport">
@@ -1063,7 +1109,7 @@ onUnmounted(() => {
               </svg>
             </div>
             <h3>2. Daltonismo (Ishihara)</h3>
-            <p>3 láminas de prueba clínica para descartar ceguera al rojo-verde (protanopía/deuteranopía), indispensable para interpretar semáforos y señalización vial nocturna.</p>
+            <p>4 láminas de prueba clínica para descartar ceguera al rojo-verde (protanopía/deuteranopía), indispensable para interpretar semáforos y señalización vial nocturna.</p>
           </div>
 
           <!-- Tarjeta 3: Audiometría Estéreo -->
@@ -1136,325 +1182,791 @@ onUnmounted(() => {
 
       <!-- PANTALLA 1: PRUEBA DE VISIÓN MONOCULAR (OD + OI) -->
       <article v-if="currentStage === 'vision'" class="view-panel active">
-        <!-- FASE DE EXAMEN ACTIVA (OD u OI) -->
-        <template v-if="eyePhase === 'test'">
-          <div class="panel-header">
-            <div class="test-tag">
-              PRUEBA 1 / 4 &bull; AGUDEZA VISUAL
-              <span class="eye-indicator-pill">
-                {{ currentEye === 'OD' ? 'FASE 1: OJO DERECHO (OD)' : 'FASE 2: OJO IZQUIERDO (OI)' }}
-              </span>
+        <!-- FASE PREPARATORIA (BRIEFING INFORMATIVO) -->
+        <template v-if="stagePhase === 'briefing'">
+          <div class="clinical-briefing-card">
+            <div class="briefing-top-badge">
+              <span class="briefing-pulse-dot"></span>
+              <span>INSTRUCCIÓN PREVIA AL EXAMEN &bull; ETAPA 1 DE 4</span>
             </div>
-            <div class="round-tracker">
-              <span>Intento:</span>
-              <strong>{{ visionRound + 1 }} / {{ visionTotalRounds }}</strong>
-            </div>
-          </div>
 
-          <!-- Banner dinámico según el ojo activo -->
-          <div class="instruction-banner warning-banner">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-              <circle cx="12" cy="12" r="3"/>
-              <line x1="2" y1="2" x2="22" y2="22"/>
-            </svg>
-            <div v-if="currentEye === 'OD'">
-              <strong>INSTRUCCIÓN CLÍNICA:</strong> Tápese el <strong>OJO IZQUIERDO</strong> con una mano sin presionar el globo ocular. Mire fijamente la pantalla con su <strong>OJO DERECHO</strong>. {{ examMode === 'official' ? 'Tiene 2.5s por intento.' : 'Modo práctica: sin límite de tiempo.' }}
+            <div class="briefing-title-group">
+              <h2>Prueba 1: Agudeza Visual Monocular (Anillos de Landolt)</h2>
+              <p>Evaluación de resolución óptica y nitidez foveal según norma internacional ISO 8596 / INTRANT.</p>
             </div>
-            <div v-else>
-              <strong>INSTRUCCIÓN CLÍNICA:</strong> Tápese el <strong>OJO DERECHO</strong> con una mano sin presionar el globo ocular. Mire fijamente la pantalla con su <strong>OJO IZQUIERDO</strong>. {{ examMode === 'official' ? 'Tiene 2.5s por intento.' : 'Modo práctica: sin límite de tiempo.' }}
-            </div>
-          </div>
 
-          <div class="optotype-stage">
-            <div class="crosshair-guide"></div>
-            <div class="vision-countdown-badge" :class="{ urgent: visionIsUrgent }">Tiempo: {{ visionTimeRemaining }}</div>
-            <div class="optotype-container">
-              <svg viewBox="0 0 100 100" class="landolt-ring" :style="{ width: `${currentCalibratedSize}px`, height: `${currentCalibratedSize}px` }" v-html="currentLandoltSvg"></svg>
-            </div>
-            <div class="snellen-scale-badge">Escala: {{ currentRoundData.snellen }} ({{ currentRoundData.difficulty }})</div>
-          </div>
-
-          <div class="interaction-hints">
-            <p class="hint-text">Identifique la hendidura de la letra C cerrada hacia cuál de las <strong>4 direcciones</strong> apunta:</p>
-            <div class="dpad-controller">
-              <button class="dpad-btn up" :class="{ 'pressed-active': activeKey === 'ArrowUp' }" @pointerdown.prevent="handleVisionAnswer('up')" title="Apertura hacia Arriba">
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
-                <kbd>&uarr; Arriba</kbd>
-              </button>
-              <div class="dpad-row">
-                <button class="dpad-btn left" :class="{ 'pressed-active': activeKey === 'ArrowLeft' }" @pointerdown.prevent="handleVisionAnswer('left')" title="Apertura hacia la Izquierda">
-                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
-                  <kbd>&larr; Izq</kbd>
-                </button>
-                <div class="dpad-center-badge">
-                  <span>{{ currentEye }}</span>
+            <div class="briefing-details-grid">
+              <!-- Panel 1: Qué se va a hacer -->
+              <div class="briefing-panel-card">
+                <div class="bpanel-header">
+                  <div class="bpanel-icon eye-blue">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <h3>¿Qué se va a evaluar?</h3>
+                    <small>Agudeza foveal bilateral independiente</small>
+                  </div>
                 </div>
-                <button class="dpad-btn right" :class="{ 'pressed-active': activeKey === 'ArrowRight' }" @pointerdown.prevent="handleVisionAnswer('right')" title="Apertura hacia la Derecha">
-                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-                  <kbd>Der &rarr;</kbd>
-                </button>
+                <p class="bpanel-desc">
+                  Se proyectará una serie de <strong>anillos de Landolt con hendidura fina</strong> de tamaño decreciente (escalas Snellen de 20/100 hasta 20/20).
+                </p>
+                <ul class="bpanel-bullet-list">
+                  <li><strong>Evaluación bilateral separada:</strong> Primero se evalúa el Ojo Derecho (5 anillos) y luego el Ojo Izquierdo (5 anillos).</li>
+                  <li><strong>Objetivo:</strong> Identificar hacia cuál de las 4 direcciones (Arriba, Abajo, Izquierda o Derecha) apunta la apertura de la letra C.</li>
+                  <li><strong>Tiempo de respuesta:</strong> {{ examMode === 'official' ? 'Dispone de exactamente 2.5 segundos por intento en Modo Oficial.' : 'Modo Práctica sin penalización de tiempo.' }}</li>
+                </ul>
               </div>
-              <button class="dpad-btn down" :class="{ 'pressed-active': activeKey === 'ArrowDown' }" @pointerdown.prevent="handleVisionAnswer('down')" title="Apertura hacia Abajo">
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-                <kbd>&darr; Abajo</kbd>
-              </button>
-            </div>
-          </div>
 
-          <div class="round-progress-bar">
-            <div class="progress-fill" :style="{ width: `${((visionRound + 1) / visionTotalRounds) * 100}%` }"></div>
+              <!-- Panel 2: Qué debe hacer el usuario -->
+              <div class="briefing-panel-card action-priority-card">
+                <div class="bpanel-header">
+                  <div class="bpanel-icon task-cyan">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="9 11 12 14 22 4"/>
+                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <h3>¿Qué debe hacer antes de iniciar?</h3>
+                    <small>Preparación postural y física obligatoria</small>
+                  </div>
+                </div>
+
+                <div class="preparation-steps-flow">
+                  <div class="prep-step-item">
+                    <span class="prep-num-bubble">1</span>
+                    <div class="prep-step-info">
+                      <strong>Tápese el Ojo Izquierdo (OI)</strong>
+                      <span>Cubra su ojo izquierdo con la palma de la mano izquierda sin presionar el globo ocular. Mantenga el ojo derecho abierto mirando al centro.</span>
+                    </div>
+                  </div>
+
+                  <div class="prep-step-item">
+                    <span class="prep-num-bubble">2</span>
+                    <div class="prep-step-info">
+                      <strong>Ubique sus dedos en las flechas</strong>
+                      <span>Coloque su mano en las flechas del teclado (&uarr;, &darr;, &larr;, &rarr;) o prepare su pulgar sobre la botonera táctil en pantalla.</span>
+                    </div>
+                  </div>
+
+                  <div class="prep-step-item">
+                    <span class="prep-num-bubble">3</span>
+                    <div class="prep-step-info">
+                      <strong>Pulse "¡ESTOY LISTO, COMENZAR!"</strong>
+                      <span>El examen no empezará hasta que presione el botón. La voz se apagará de inmediato para no desconcentrarle.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="briefing-keys-strip">
+              <span class="keys-legend-title">Controles de respuesta:</span>
+              <div class="keys-badges-wrap">
+                <span class="key-pill"><kbd>&uarr;</kbd> Arriba</span>
+                <span class="key-pill"><kbd>&darr;</kbd> Abajo</span>
+                <span class="key-pill"><kbd>&larr;</kbd> Izquierda</span>
+                <span class="key-pill"><kbd>&rarr;</kbd> Derecha</span>
+                <span class="key-pill"><kbd>ENTER</kbd> Iniciar prueba</span>
+              </div>
+              <span class="touch-hint">&bull; O toque los botones virtuales en pantallas táctiles</span>
+            </div>
+
+            <div class="briefing-action-footer">
+              <button type="button" class="btn-primary-action btn-ready-action" @pointerdown.prevent="beginActiveVisionTest">
+                <span>¡ESTOY LISTO, COMENZAR EVALUACIÓN DE OJO DERECHO!</span>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                  <polyline points="12 5 19 12 12 19"/>
+                </svg>
+              </button>
+              <span class="briefing-guarantee-note">Garantía clínica: El cronómetro de 2.5s se iniciará únicamente después de hacer clic.</span>
+            </div>
           </div>
         </template>
 
-        <!-- PANTALLA INTERMEDIA: CAMBIO DE OJO -->
-        <template v-else-if="eyePhase === 'transition'">
-          <div class="eye-switch-card">
-            <div class="eye-switch-icon">
-              <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="currentColor" stroke-width="2">
+        <!-- FASE ACTIVA -->
+        <template v-else-if="stagePhase === 'active'">
+          <!-- FASE DE EXAMEN ACTIVA (OD u OI) -->
+          <template v-if="eyePhase === 'test'">
+            <div class="panel-header">
+              <div class="test-tag">
+                PRUEBA 1 / 4 &bull; AGUDEZA VISUAL
+                <span class="eye-indicator-pill">
+                  {{ currentEye === 'OD' ? 'FASE 1: OJO DERECHO (OD)' : 'FASE 2: OJO IZQUIERDO (OI)' }}
+                </span>
+              </div>
+              <div class="round-tracker">
+                <span>Intento:</span>
+                <strong>{{ visionRound + 1 }} / {{ visionTotalRounds }}</strong>
+              </div>
+            </div>
+
+            <!-- Banner dinámico según el ojo activo -->
+            <div class="instruction-banner warning-banner">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                 <circle cx="12" cy="12" r="3"/>
-                <path d="M21 3l-6 6M15 3h6v6"/>
+                <line x1="2" y1="2" x2="22" y2="22"/>
               </svg>
+              <div v-if="currentEye === 'OD'">
+                <strong>INSTRUCCIÓN CLÍNICA:</strong> Tápese el <strong>OJO IZQUIERDO</strong> con una mano sin presionar el globo ocular. Mire fijamente la pantalla con su <strong>OJO DERECHO</strong>. {{ examMode === 'official' ? 'Tiene 2.5s por intento.' : 'Modo práctica: sin límite de tiempo.' }}
+              </div>
+              <div v-else>
+                <strong>INSTRUCCIÓN CLÍNICA:</strong> Tápese el <strong>OJO DERECHO</strong> con una mano sin presionar el globo ocular. Mire fijamente la pantalla con su <strong>OJO IZQUIERDO</strong>. {{ examMode === 'official' ? 'Tiene 2.5s por intento.' : 'Modo práctica: sin límite de tiempo.' }}
+              </div>
             </div>
-            <div class="eye-switch-badge">OJO DERECHO (OD) COMPLETADO</div>
-            <h3>¡Excelente! Ahora cambie de ojo</h3>
-            <p>
-              Descubra su <strong>ojo izquierdo</strong> y ahora <strong>tápese el ojo derecho</strong> con la mano sin presionar el globo ocular.
-            </p>
-            <button class="btn-primary-action" @pointerdown.prevent="continueWithLeftEye">
-              <span>CONTINUAR CON OJO IZQUIERDO (5 INTENTOS)</span>
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
-                <line x1="5" y1="12" x2="19" y2="12"/>
-                <polyline points="12 5 19 12 12 19"/>
-              </svg>
-            </button>
-          </div>
+
+            <div class="optotype-stage">
+              <div class="crosshair-guide"></div>
+              <div class="vision-countdown-badge" :class="{ urgent: visionIsUrgent }">Tiempo: {{ visionTimeRemaining }}</div>
+              <div class="optotype-container">
+                <svg viewBox="0 0 100 100" class="landolt-ring" :style="{ width: `${currentCalibratedSize}px`, height: `${currentCalibratedSize}px` }" v-html="currentLandoltSvg"></svg>
+              </div>
+              <div class="snellen-scale-badge">Escala: {{ currentRoundData.snellen }} ({{ currentRoundData.difficulty }})</div>
+            </div>
+
+            <div class="interaction-hints">
+              <p class="hint-text">Identifique la hendidura de la letra C cerrada hacia cuál de las <strong>4 direcciones</strong> apunta:</p>
+              <div class="dpad-controller">
+                <button class="dpad-btn up" :class="{ 'pressed-active': activeKey === 'ArrowUp' }" @pointerdown.prevent="handleVisionAnswer('up')" title="Apertura hacia Arriba">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+                  <kbd>&uarr; Arriba</kbd>
+                </button>
+                <div class="dpad-row">
+                  <button class="dpad-btn left" :class="{ 'pressed-active': activeKey === 'ArrowLeft' }" @pointerdown.prevent="handleVisionAnswer('left')" title="Apertura hacia la Izquierda">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+                    <kbd>&larr; Izq</kbd>
+                  </button>
+                  <div class="dpad-center-badge">
+                    <span>{{ currentEye }}</span>
+                  </div>
+                  <button class="dpad-btn right" :class="{ 'pressed-active': activeKey === 'ArrowRight' }" @pointerdown.prevent="handleVisionAnswer('right')" title="Apertura hacia la Derecha">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                    <kbd>Der &rarr;</kbd>
+                  </button>
+                </div>
+                <button class="dpad-btn down" :class="{ 'pressed-active': activeKey === 'ArrowDown' }" @pointerdown.prevent="handleVisionAnswer('down')" title="Apertura hacia Abajo">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                  <kbd>&darr; Abajo</kbd>
+                </button>
+              </div>
+            </div>
+
+            <div class="round-progress-bar">
+              <div class="progress-fill" :style="{ width: `${((visionRound + 1) / visionTotalRounds) * 100}%` }"></div>
+            </div>
+          </template>
+
+          <!-- PANTALLA INTERMEDIA: CAMBIO DE OJO -->
+          <template v-else-if="eyePhase === 'transition'">
+            <div class="eye-switch-card">
+              <div class="eye-switch-icon">
+                <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M21 3l-6 6M15 3h6v6"/>
+                </svg>
+              </div>
+              <div class="eye-switch-badge">OJO DERECHO (OD) COMPLETADO</div>
+              <h3>¡Excelente! Ahora cambie de ojo</h3>
+              <p>
+                Descubra su <strong>ojo izquierdo</strong> y ahora <strong>tápese el ojo derecho</strong> con la mano sin presionar el globo ocular.
+              </p>
+              <button class="btn-primary-action" @pointerdown.prevent="continueWithLeftEye">
+                <span>CONTINUAR CON OJO IZQUIERDO (5 INTENTOS)</span>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                  <polyline points="12 5 19 12 12 19"/>
+                </svg>
+              </button>
+            </div>
+          </template>
         </template>
       </article>
 
       <!-- PANTALLA 2: PRUEBA DE DALTONISMO (ISHIHARA) -->
       <article v-if="currentStage === 'ishihara'" class="view-panel active">
-        <div class="panel-header">
-          <div class="test-tag">PRUEBA 2 / 4 &bull; DISCRIMINACIÓN CROMÁTICA (ISHIHARA)</div>
-          <div class="round-tracker">
-            <span>Lámina:</span>
-            <strong>{{ ishiharaRound + 1 }} / {{ ishiharaTotalRounds }}</strong>
-          </div>
-        </div>
+        <!-- FASE PREPARATORIA (BRIEFING INFORMATIVO) -->
+        <template v-if="stagePhase === 'briefing'">
+          <div class="clinical-briefing-card">
+            <div class="briefing-top-badge">
+              <span class="briefing-pulse-dot"></span>
+              <span>INSTRUCCIÓN PREVIA AL EXAMEN &bull; ETAPA 2 DE 4</span>
+            </div>
 
-        <div class="instruction-banner info-banner">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="16" x2="12" y2="12"/>
-            <line x1="12" y1="8" x2="12.01" y2="8"/>
-          </svg>
-          <div>
-            <strong>INSTRUCCIÓN CLÍNICA:</strong> Observe la lámina circular e indique qué número percibe con claridad. {{ examMode === 'official' ? 'Tiene 6 segundos.' : 'Modo práctica sin tiempo.' }}
-          </div>
-        </div>
+            <div class="briefing-title-group">
+              <h2>Prueba 2: Discriminación Cromática (Test de Ishihara)</h2>
+              <p>Evaluación de la visión del color para detección de protanopía, deuteranopía y aptitud ante semáforos viales.</p>
+            </div>
 
-        <div class="ishihara-stage">
-          <div class="ishihara-plate-container">
-            <svg viewBox="0 0 100 100" class="ishihara-svg" v-html="currentIshiharaSvg"></svg>
-          </div>
-          <div class="vision-countdown-badge">Tiempo: {{ ishiharaTimeRemaining }}</div>
-          <p class="hint-text">Seleccione el número que ve dentro de los puntos de la lámina:</p>
-          <div class="ishihara-options-grid">
-            <button 
-              v-for="opt in currentIshiharaPlate.options" 
-              :key="opt"
-              class="ishihara-option-btn"
-              @pointerdown.prevent="handleIshiharaAnswer(opt)"
-            >
-              {{ opt }}
-            </button>
-          </div>
-        </div>
+            <div class="briefing-details-grid">
+              <!-- Panel 1: Qué se va a evaluar -->
+              <div class="briefing-panel-card">
+                <div class="bpanel-header">
+                  <div class="bpanel-icon eye-amber">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="10"/>
+                      <circle cx="12" cy="12" r="4"/>
+                      <line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/>
+                      <line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/>
+                      <line x1="14.83" y1="9.17" x2="19.07" y2="4.93"/>
+                      <line x1="4.93" y1="19.07" x2="9.17" y2="14.83"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <h3>¿Qué se va a evaluar?</h3>
+                    <small>Sensibilidad a frecuencias cromáticas</small>
+                  </div>
+                </div>
+                <p class="bpanel-desc">
+                  Se proyectarán <strong>4 láminas pseudoisocromáticas de Ishihara</strong> con matrices de puntos de colores y luminosidad controlada.
+                </p>
+                <ul class="bpanel-bullet-list">
+                  <li><strong>Visión binocular natural:</strong> No necesita taparse ningún ojo; observe la pantalla con ambos ojos abiertos.</li>
+                  <li><strong>Lentes habituales:</strong> Si utiliza gafas o lentes de contacto para ver de cerca o conducir, úselos durante la prueba.</li>
+                  <li><strong>Tiempo por lámina:</strong> {{ examMode === 'official' ? 'Dispone de 6.0 segundos por lámina en Modo Oficial.' : 'Modo Práctica sin límite de tiempo.' }}</li>
+                </ul>
+              </div>
 
-        <div class="round-progress-bar">
-          <div class="progress-fill" :style="{ width: `${((ishiharaRound + 1) / ishiharaTotalRounds) * 100}%` }"></div>
-        </div>
+              <!-- Panel 2: Qué debe hacer el usuario -->
+              <div class="briefing-panel-card action-priority-card">
+                <div class="bpanel-header">
+                  <div class="bpanel-icon task-amber">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="9 11 12 14 22 4"/>
+                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <h3>¿Qué debe hacer antes de iniciar?</h3>
+                    <small>Condiciones óptimas de observación</small>
+                  </div>
+                </div>
+
+                <div class="preparation-steps-flow">
+                  <div class="prep-step-item">
+                    <span class="prep-num-bubble">1</span>
+                    <div class="prep-step-info">
+                      <strong>Destape ambos ojos</strong>
+                      <span>Asegúrese de tener ambos ojos completamente descubiertos y mire de frente a la pantalla a una distancia de 50 a 70 cm.</span>
+                    </div>
+                  </div>
+
+                  <div class="prep-step-item">
+                    <span class="prep-num-bubble">2</span>
+                    <div class="prep-step-info">
+                      <strong>Evite reflejos de luz</strong>
+                      <span>Compruebe que no haya reflejos solares directos sobre su monitor o móvil que alteren la saturación de los círculos.</span>
+                    </div>
+                  </div>
+
+                  <div class="prep-step-item">
+                    <span class="prep-num-bubble">3</span>
+                    <div class="prep-step-info">
+                      <strong>Identifique y seleccione el número</strong>
+                      <span>Al ver la lámina, pulse el botón con el número correspondiente o seleccione "Ninguno" si no percibe cifra.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="briefing-keys-strip">
+              <span class="keys-legend-title">Modalidad de respuesta:</span>
+              <div class="keys-badges-wrap">
+                <span class="key-pill"><kbd>Clic / Toque</kbd> En una de las 4 opciones numéricas</span>
+                <span class="key-pill"><kbd>ENTER</kbd> Iniciar prueba</span>
+              </div>
+              <span class="touch-hint">&bull; Opciones optimizadas para dedos y puntero</span>
+            </div>
+
+            <div class="briefing-action-footer">
+              <button type="button" class="btn-primary-action btn-ready-action" @pointerdown.prevent="beginActiveIshiharaTest">
+                <span>¡ESTOY LISTO, COMENZAR DISCRIMINACIÓN CROMÁTICA!</span>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                  <polyline points="12 5 19 12 12 19"/>
+                </svg>
+              </button>
+              <span class="briefing-guarantee-note">El audio explicativo se silenciará en el instante que pulse este botón.</span>
+            </div>
+          </div>
+        </template>
+
+        <!-- FASE ACTIVA -->
+        <template v-else-if="stagePhase === 'active'">
+          <div class="panel-header">
+            <div class="test-tag">PRUEBA 2 / 4 &bull; DISCRIMINACIÓN CROMÁTICA (ISHIHARA)</div>
+            <div class="round-tracker">
+              <span>Lámina:</span>
+              <strong>{{ ishiharaRound + 1 }} / {{ ishiharaTotalRounds }}</strong>
+            </div>
+          </div>
+
+          <div class="instruction-banner info-banner">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="16" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <div>
+              <strong>INSTRUCCIÓN CLÍNICA:</strong> Observe la lámina circular e indique qué número percibe con claridad. {{ examMode === 'official' ? 'Tiene 6 segundos.' : 'Modo práctica sin tiempo.' }}
+            </div>
+          </div>
+
+          <div class="ishihara-stage">
+            <div class="ishihara-plate-container">
+              <svg viewBox="0 0 100 100" class="ishihara-svg" v-html="currentIshiharaSvg"></svg>
+            </div>
+            <div class="vision-countdown-badge">Tiempo: {{ ishiharaTimeRemaining }}</div>
+            <p class="hint-text">Seleccione el número que ve dentro de los puntos de la lámina:</p>
+            <div class="ishihara-options-grid">
+              <button 
+                v-for="opt in currentIshiharaPlate.options" 
+                :key="opt"
+                class="ishihara-option-btn"
+                @pointerdown.prevent="handleIshiharaAnswer(opt)"
+              >
+                {{ opt }}
+              </button>
+            </div>
+          </div>
+
+          <div class="round-progress-bar">
+            <div class="progress-fill" :style="{ width: `${((ishiharaRound + 1) / ishiharaTotalRounds) * 100}%` }"></div>
+          </div>
+        </template>
       </article>
 
       <!-- PANTALLA 3: AUDIOMETRÍA A CIEGAS (2.0s) -->
       <article v-if="currentStage === 'audio'" class="view-panel active">
-        <div class="panel-header">
-          <div class="test-tag">PRUEBA 3 / 4 &bull; LOCALIZACIÓN AUDITIVA (A CIEGAS)</div>
-          <div class="round-tracker">
-            <span>Intento:</span>
-            <strong>{{ audioRound + 1 }} / {{ audioTotalRounds }}</strong>
-          </div>
-        </div>
+        <!-- FASE PREPARATORIA (BRIEFING INFORMATIVO) -->
+        <template v-if="stagePhase === 'briefing'">
+          <div class="clinical-briefing-card">
+            <div class="briefing-top-badge">
+              <span class="briefing-pulse-dot"></span>
+              <span>INSTRUCCIÓN PREVIA AL EXAMEN &bull; ETAPA 3 DE 4</span>
+            </div>
 
-        <div class="instruction-banner info-banner">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="16" x2="12" y2="12"/>
-            <line x1="12" y1="8" x2="12.01" y2="8"/>
-          </svg>
-          <div>
-            <strong>INSTRUCCIÓN CLÍNICA:</strong> Escuche con atención sus audífonos. <strong>La pantalla NO indicará de qué lado suena.</strong> {{ examMode === 'official' ? 'Tiene exactamente 2.0s para responder.' : 'Modo práctica sin tiempo.' }}
-          </div>
-        </div>
+            <div class="briefing-title-group">
+              <h2>Prueba 3: Localización Auditiva Estéreo (Audiometría a Ciegas)</h2>
+              <p>Evaluación de agudeza acústica lateral y reflejo binaural para detección de sirenas y vehículos de emergencia.</p>
+            </div>
 
-        <div class="audio-stage-tools">
-          <button 
-            type="button" 
-            class="tool-chip-btn-sm" 
-            :class="{ active: channelsInvertedState }"
-            @pointerdown.prevent="toggleChannelsInverted"
-            title="Invertir canales izquierdo y derecho"
-          >
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>
-              <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
-            </svg>
-            <span>{{ channelsInvertedState ? 'Canales: Invertidos (L⇄R)' : 'Canales: Estándar (L/R)' }}</span>
-          </button>
-          <button 
-            type="button" 
-            class="tool-chip-btn-sm" 
-            :disabled="isTestingStereo"
-            @pointerdown.prevent="handleStereoTestClick"
-          >
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-            </svg>
-            <span>{{ isTestingStereo ? 'Probando...' : 'Probar Oídos (L/R)' }}</span>
-          </button>
-        </div>
+            <div class="briefing-details-grid">
+              <!-- Panel 1: Qué se va a evaluar -->
+              <div class="briefing-panel-card">
+                <div class="bpanel-header">
+                  <div class="bpanel-icon ear-purple">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M6 9a6 6 0 0 1 12 0v5a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V9a6 6 0 0 1 6-6"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <h3>¿Qué se va a evaluar?</h3>
+                    <small>Aislamiento acústico binaural L / R</small>
+                  </div>
+                </div>
+                <p class="bpanel-desc">
+                  Se emitirán <strong>5 estímulos acústicos clínicos a ciegas</strong>. La pantalla NO mostrará pistas visuales ni encenderá luces de qué lado suena.
+                </p>
+                <ul class="bpanel-bullet-list">
+                  <li><strong>Evaluación a ciegas:</strong> Confíe exclusivamente en sus oídos para identificar si el tono suena por la izquierda o la derecha.</li>
+                  <li><strong>Eventos de silencio clínico:</strong> En algunas rondas habrá silencio total deliberado para verificar ausencia de falsos positivos ("No escucho nada").</li>
+                  <li><strong>Tiempo de respuesta:</strong> {{ examMode === 'official' ? 'Dispone de 2.0 segundos exactos tras finalizar el tono.' : 'Modo Práctica con respuesta libre.' }}</li>
+                </ul>
+              </div>
 
-        <div class="audio-stage">
-          <div class="blind-audiometer-rig">
-            <div class="ear-channel-blind">
-              <div class="ear-icon-neutral">
-                <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.8">
-                  <path d="M6 9a6 6 0 0 1 12 0v5a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V9a6 6 0 0 1 6-6"/>
+              <!-- Panel 2: Qué debe hacer el usuario -->
+              <div class="briefing-panel-card action-priority-card">
+                <div class="bpanel-header">
+                  <div class="bpanel-icon task-purple">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="9 11 12 14 22 4"/>
+                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <h3>¿Qué debe hacer antes de iniciar?</h3>
+                    <small>Calibración de auriculares obligatoria</small>
+                  </div>
+                </div>
+
+                <div class="preparation-steps-flow">
+                  <div class="prep-step-item">
+                    <span class="prep-num-bubble">1</span>
+                    <div class="prep-step-info">
+                      <strong>Colóquese sus audífonos estéreo</strong>
+                      <span>Asegúrese de colocar el audífono marcado con "L" en el oído izquierdo y el "R" en el oído derecho.</span>
+                    </div>
+                  </div>
+
+                  <div class="prep-step-item">
+                    <span class="prep-num-bubble">2</span>
+                    <div class="prep-step-info">
+                      <strong>Calibre el sonido aquí mismo</strong>
+                      <span>Pulse los botones inferiores de prueba. Si escucha el tono al revés, presione "Invertir Canales".</span>
+                    </div>
+                  </div>
+
+                  <div class="prep-step-item">
+                    <span class="prep-num-bubble">3</span>
+                    <div class="prep-step-info">
+                      <strong>Silencio ambiental</strong>
+                      <span>Evite ruidos externos y presione "¡ESTOY LISTO!" cuando esté preparado para escuchar los tonos.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Calibrador integrado directamente en el briefing -->
+            <div class="briefing-audio-tools-box">
+              <div class="atools-title">Herramientas de Verificación de Auriculares:</div>
+              <div class="atools-btns">
+                <button 
+                  type="button" 
+                  class="tool-chip-btn-sm" 
+                  :disabled="isTestingStereo"
+                  @pointerdown.prevent="handleStereoTestClick"
+                >
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                  </svg>
+                  <span>{{ isTestingStereo ? 'Emitiendo prueba...' : 'Probar Oído Izquierdo y Derecho (L/R)' }}</span>
+                </button>
+                <button 
+                  type="button" 
+                  class="tool-chip-btn-sm" 
+                  :class="{ active: channelsInvertedState }"
+                  @pointerdown.prevent="toggleChannelsInverted"
+                  title="Invertir canales si sus audífonos están puestos al revés"
+                >
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+                    <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+                  </svg>
+                  <span>{{ channelsInvertedState ? 'Canales: Invertidos (L⇄R)' : 'Invertir Canales L/R' }}</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="briefing-keys-strip">
+              <span class="keys-legend-title">Botones de respuesta durante el examen:</span>
+              <div class="keys-badges-wrap">
+                <span class="key-pill"><kbd>&larr;</kbd> Oído Izquierdo</span>
+                <span class="key-pill"><kbd>&rarr;</kbd> Oído Derecho</span>
+                <span class="key-pill"><kbd>ESPACIO</kbd> No escucho nada</span>
+                <span class="key-pill"><kbd>ENTER</kbd> Iniciar prueba</span>
+              </div>
+              <span class="touch-hint">&bull; Botones táctiles de gran tamaño en pantalla</span>
+            </div>
+
+            <div class="briefing-action-footer">
+              <button type="button" class="btn-primary-action btn-ready-action" @pointerdown.prevent="beginActiveAudioTest">
+                <span>¡ESTOY LISTO, COMENZAR AUDIOMETRÍA A CIEGAS!</span>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                  <polyline points="12 5 19 12 12 19"/>
                 </svg>
-              </div>
-              <span class="subtext">Canal Izquierdo (L)</span>
-            </div>
-
-            <div class="audio-timer-center">
-              <div class="audio-countdown-ring" :class="{ urgent: audioIsUrgent }">
-                <span class="countdown-seconds">{{ audioTimeRemaining }}</span>
-                <span class="countdown-label">Tiempo límite</span>
-              </div>
-              <div class="audio-status-pill">{{ audioStateLabel }}</div>
-              <div v-if="isAudioWaiting" class="acoustic-wave-active" aria-hidden="true" title="Estímulo de audio emitiéndose">
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
-              </div>
-            </div>
-
-            <div class="ear-channel-blind">
-              <div class="ear-icon-neutral">
-                <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.8">
-                  <path d="M18 9a6 6 0 0 0-12 0v5a4 4 0 0 0 4 4h6a4 4 0 0 0 4-4V9a6 6 0 0 0-6-6"/>
-                </svg>
-              </div>
-              <span class="subtext">Canal Derecho (R)</span>
+              </button>
+              <span class="briefing-guarantee-note">Cero solapamiento de audio: Cualquier voz de ayuda se apaga inmediatamente al pulsar iniciar.</span>
             </div>
           </div>
-        </div>
+        </template>
 
-        <div class="audio-response-controls">
-          <button class="audio-resp-btn btn-left" :class="{ 'pressed-active': activeKey === 'ArrowLeft' }" @pointerdown.prevent="handleAudioAnswer('left')">
-            <kbd>&larr;</kbd>
-            <div class="btn-text-wrap">
-              <strong>Oído Izquierdo</strong>
-              <small>Flecha Izquierda</small>
+        <!-- FASE ACTIVA -->
+        <template v-else-if="stagePhase === 'active'">
+          <div class="panel-header">
+            <div class="test-tag">PRUEBA 3 / 4 &bull; LOCALIZACIÓN AUDITIVA (A CIEGAS)</div>
+            <div class="round-tracker">
+              <span>Intento:</span>
+              <strong>{{ audioRound + 1 }} / {{ audioTotalRounds }}</strong>
             </div>
-          </button>
+          </div>
 
-          <button class="audio-resp-btn btn-none" :class="{ 'pressed-active': activeKey === ' ' || activeKey === 'Space' }" @pointerdown.prevent="handleAudioAnswer('none')">
-            <kbd>ESPACIO</kbd>
-            <div class="btn-text-wrap">
-              <strong>No escucho nada</strong>
-              <small>Silencio detectado</small>
+          <div class="instruction-banner info-banner">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="16" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <div>
+              <strong>INSTRUCCIÓN CLÍNICA:</strong> Escuche con atención sus audífonos. <strong>La pantalla NO indicará de qué lado suena.</strong> {{ examMode === 'official' ? 'Tiene exactamente 2.0s para responder.' : 'Modo práctica sin tiempo.' }}
             </div>
-          </button>
+          </div>
 
-          <button class="audio-resp-btn btn-right" :class="{ 'pressed-active': activeKey === 'ArrowRight' }" @pointerdown.prevent="handleAudioAnswer('right')">
-            <div class="btn-text-wrap">
-              <strong>Oído Derecho</strong>
-              <small>Flecha Derecha</small>
+          <div class="audio-stage-tools">
+            <button 
+              type="button" 
+              class="tool-chip-btn-sm" 
+              :class="{ active: channelsInvertedState }"
+              @pointerdown.prevent="toggleChannelsInverted"
+              title="Invertir canales izquierdo y derecho"
+            >
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+                <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+              </svg>
+              <span>{{ channelsInvertedState ? 'Canales: Invertidos (L⇄R)' : 'Canales: Estándar (L/R)' }}</span>
+            </button>
+            <button 
+              type="button" 
+              class="tool-chip-btn-sm" 
+              :disabled="isTestingStereo"
+              @pointerdown.prevent="handleStereoTestClick"
+            >
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+              </svg>
+              <span>{{ isTestingStereo ? 'Probando...' : 'Probar Oídos (L/R)' }}</span>
+            </button>
+          </div>
+
+          <div class="audio-stage">
+            <div class="blind-audiometer-rig">
+              <div class="ear-channel-blind">
+                <div class="ear-icon-neutral">
+                  <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <path d="M6 9a6 6 0 0 1 12 0v5a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V9a6 6 0 0 1 6-6"/>
+                  </svg>
+                </div>
+                <span class="subtext">Canal Izquierdo (L)</span>
+              </div>
+
+              <div class="audio-timer-center">
+                <div class="audio-countdown-ring" :class="{ urgent: audioIsUrgent }">
+                  <span class="countdown-seconds">{{ audioTimeRemaining }}</span>
+                  <span class="countdown-label">Tiempo límite</span>
+                </div>
+                <div class="audio-status-pill">{{ audioStateLabel }}</div>
+                <div v-if="isAudioWaiting" class="acoustic-wave-active" aria-hidden="true" title="Estímulo de audio emitiéndose">
+                  <span class="wave-bar"></span>
+                  <span class="wave-bar"></span>
+                  <span class="wave-bar"></span>
+                  <span class="wave-bar"></span>
+                  <span class="wave-bar"></span>
+                </div>
+              </div>
+
+              <div class="ear-channel-blind">
+                <div class="ear-icon-neutral">
+                  <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <path d="M18 9a6 6 0 0 0-12 0v5a4 4 0 0 0 4 4h6a4 4 0 0 0 4-4V9a6 6 0 0 0-6-6"/>
+                  </svg>
+                </div>
+                <span class="subtext">Canal Derecho (R)</span>
+              </div>
             </div>
-            <kbd>&rarr;</kbd>
-          </button>
-        </div>
+          </div>
 
-        <div class="round-progress-bar">
-          <div class="progress-fill" :style="{ width: `${((audioRound + 1) / audioTotalRounds) * 100}%` }"></div>
-        </div>
+          <div class="audio-response-controls">
+            <button class="audio-resp-btn btn-left" :class="{ 'pressed-active': activeKey === 'ArrowLeft' }" @pointerdown.prevent="handleAudioAnswer('left')">
+              <kbd>&larr;</kbd>
+              <div class="btn-text-wrap">
+                <strong>Oído Izquierdo</strong>
+                <small>Flecha Izquierda</small>
+              </div>
+            </button>
+
+            <button class="audio-resp-btn btn-none" :class="{ 'pressed-active': activeKey === ' ' || activeKey === 'Space' }" @pointerdown.prevent="handleAudioAnswer('none')">
+              <kbd>ESPACIO</kbd>
+              <div class="btn-text-wrap">
+                <strong>No escucho nada</strong>
+                <small>Silencio detectado</small>
+              </div>
+            </button>
+
+            <button class="audio-resp-btn btn-right" :class="{ 'pressed-active': activeKey === 'ArrowRight' }" @pointerdown.prevent="handleAudioAnswer('right')">
+              <div class="btn-text-wrap">
+                <strong>Oído Derecho</strong>
+                <small>Flecha Derecha</small>
+              </div>
+              <kbd>&rarr;</kbd>
+            </button>
+          </div>
+
+          <div class="round-progress-bar">
+            <div class="progress-fill" :style="{ width: `${((audioRound + 1) / audioTotalRounds) * 100}%` }"></div>
+          </div>
+        </template>
       </article>
 
       <!-- PANTALLA 4: PRUEBA DE REFLEJOS & SEMÁFORO (2.0s) -->
       <article v-if="currentStage === 'reaction'" class="view-panel active">
-        <div class="panel-header">
-          <div class="test-tag">PRUEBA 4 / 4 &bull; TIEMPO DE REACCIÓN CROMÁTICO</div>
-          <div class="round-tracker">
-            <span>Aciertos:</span>
-            <strong>{{ reactionSuccessCount }} / {{ reactionTargetCount }}</strong>
-          </div>
-        </div>
-
-        <div class="instruction-banner danger-banner">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/>
-            <line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
-          <div>
-            <strong>INSTRUCCIÓN CLÍNICA:</strong> Presione el pulsador táctil o [ESPACIO] <strong>únicamente ante el círculo VERDE</strong>. No toque en Rojo, Amarillo ni Azul.
-          </div>
-        </div>
-
-        <div class="reaction-arena">
-          <div class="traffic-light-rig">
-            <div class="stimulus-light" :class="[currentColor ? currentColor.cssClass : 'color-off']">
-              <span class="stimulus-hint">{{ currentColor ? currentColor.name.toUpperCase() : 'Esperando estímulo...' }}</span>
+        <!-- FASE PREPARATORIA (BRIEFING INFORMATIVO) -->
+        <template v-if="stagePhase === 'briefing'">
+          <div class="clinical-briefing-card">
+            <div class="briefing-top-badge">
+              <span class="briefing-pulse-dot"></span>
+              <span>INSTRUCCIÓN PREVIA AL EXAMEN &bull; ETAPA 4 DE 4</span>
             </div>
-            <div class="reaction-countdown-badge" :class="{ urgent: reactionIsUrgent }">Tiempo: {{ reactionTimeRemaining }}</div>
-          </div>
 
-          <div class="reaction-telemetry">
-            <div class="telemetry-item">
-              <span class="telem-label">Último Tiempo</span>
-              <span class="telem-val">{{ lastReactionMs }} ms</span>
+            <div class="briefing-title-group">
+              <h2>Prueba 4: Tiempo de Reacción Complejo y Semáforo Selectivo</h2>
+              <p>Evaluación psicomotora de reflejo de frenado y discriminación inhibitoria cromática ante emergencias viales.</p>
             </div>
-            <div class="telemetry-item">
-              <span class="telem-label">Falsas Alarmas</span>
-              <span class="telem-val danger-text">{{ reactionFalseAlarms }}</span>
-            </div>
-            <div class="telemetry-item">
-              <span class="telem-label">Promedio Actual</span>
-              <span class="telem-val">{{ currentAvgMs }} ms</span>
-            </div>
-          </div>
 
-          <div class="spacebar-prompt-area">
-            <button class="spacebar-giant-btn" :class="{ 'pressed-active': activeKey === ' ' || activeKey === 'Space' }" type="button" @pointerdown.prevent="handleReactionTrigger" aria-label="Pulsar o tocar cuando aparezca el color verde">
-              <div class="space-icon-row">
-                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2">
-                  <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-                </svg>
-                <kbd class="space-kbd">ESPACIO O TOQUE</kbd>
+            <div class="briefing-details-grid">
+              <!-- Panel 1: Qué se va a evaluar -->
+              <div class="briefing-panel-card">
+                <div class="bpanel-header">
+                  <div class="bpanel-icon light-emerald">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="10"/>
+                      <line x1="12" y1="8" x2="12" y2="12"/>
+                      <line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <h3>¿Qué se va a evaluar?</h3>
+                    <small>Velocidad motora y control de impulsos</small>
+                  </div>
+                </div>
+                <p class="bpanel-desc">
+                  Aparecerán luces circulares con intervalos aleatorios entre 800 ms y 1800 ms. Los colores alternarán entre <strong>Rojo, Amarillo, Azul y Verde</strong>.
+                </p>
+                <ul class="bpanel-bullet-list">
+                  <li><strong>REGLA DE ORO:</strong> Pulse ÚNICAMENTE cuando se ilumine el color <strong>VERDE</strong>.</li>
+                  <li><strong>Penalización por falsa alarma:</strong> Si pulsa ante Rojo, Amarillo o Azul, se registrará un fallo de inhibición psicomotriz.</li>
+                  <li><strong>Criterio de aprobación:</strong> Se requieren 5 aciertos válidos con un tiempo de reacción promedio menor a 450 milisegundos.</li>
+                </ul>
               </div>
-              <span class="touch-highlight-text">¡PULSAR / TOCAR AL VER VERDE!</span>
-              <small class="touch-subtext">Respuesta táctil instantánea de cero latencia</small>
-            </button>
-          </div>
-        </div>
 
-        <div class="round-progress-bar">
-          <div class="progress-fill" :style="{ width: `${(reactionSuccessCount / reactionTargetCount) * 100}%` }"></div>
-        </div>
+              <!-- Panel 2: Qué debe hacer el usuario -->
+              <div class="briefing-panel-card action-priority-card">
+                <div class="bpanel-header">
+                  <div class="bpanel-icon task-green">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="9 11 12 14 22 4"/>
+                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <h3>¿Qué debe hacer antes de iniciar?</h3>
+                    <small>Postura de alta velocidad de respuesta</small>
+                  </div>
+                </div>
+
+                <div class="preparation-steps-flow">
+                  <div class="prep-step-item">
+                    <span class="prep-num-bubble">1</span>
+                    <div class="prep-step-info">
+                      <strong>Apoye su dedo sobre el pulsador</strong>
+                      <span>Coloque su dedo pulgar sobre la barra espaciadora de su teclado físico o mantenga el pulgar rozando el botón táctil gigante inferior.</span>
+                    </div>
+                  </div>
+
+                  <div class="prep-step-item">
+                    <span class="prep-num-bubble">2</span>
+                    <div class="prep-step-info">
+                      <strong>Mantenga la concentración en el foco</strong>
+                      <span>Las luces cambian con pausas impredecibles para evitar que anticipe el movimiento antes de tiempo.</span>
+                    </div>
+                  </div>
+
+                  <div class="prep-step-item">
+                    <span class="prep-num-bubble">3</span>
+                    <div class="prep-step-info">
+                      <strong>Pulse rápido solo al ver VERDE</strong>
+                      <span>En cuanto distinga el destello verde, presione una sola vez con la máxima rapidez posible.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="briefing-keys-strip">
+              <span class="keys-legend-title">Disparador de reacción:</span>
+              <div class="keys-badges-wrap">
+                <span class="key-pill"><kbd>ESPACIO</kbd> Pulsar al ver verde</span>
+                <span class="key-pill"><kbd>Toque táctil</kbd> En el botón gigante</span>
+                <span class="key-pill"><kbd>ENTER</kbd> Iniciar prueba</span>
+              </div>
+              <span class="touch-hint">&bull; Sensor de latencia cero para máxima precisión en ms</span>
+            </div>
+
+            <div class="briefing-action-footer">
+              <button type="button" class="btn-primary-action btn-ready-action" @pointerdown.prevent="beginActiveReactionTest">
+                <span>¡ESTOY LISTO, COMENZAR PRUEBA DE REFLEJOS!</span>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                  <polyline points="12 5 19 12 12 19"/>
+                </svg>
+              </button>
+              <span class="briefing-guarantee-note">El sensor de reflejos y el semáforo se arman inmediatamente al presionar este botón.</span>
+            </div>
+          </div>
+        </template>
+
+        <!-- FASE ACTIVA -->
+        <template v-else-if="stagePhase === 'active'">
+          <div class="panel-header">
+            <div class="test-tag">PRUEBA 4 / 4 &bull; TIEMPO DE REACCIÓN CROMÁTICO</div>
+            <div class="round-tracker">
+              <span>Aciertos:</span>
+              <strong>{{ reactionSuccessCount }} / {{ reactionTargetCount }}</strong>
+            </div>
+          </div>
+
+          <div class="instruction-banner danger-banner">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <div>
+              <strong>INSTRUCCIÓN CLÍNICA:</strong> Presione el pulsador táctil o [ESPACIO] <strong>únicamente ante el círculo VERDE</strong>. No toque en Rojo, Amarillo ni Azul.
+            </div>
+          </div>
+
+          <div class="reaction-arena">
+            <div class="traffic-light-rig">
+              <div class="stimulus-light" :class="[currentColor ? currentColor.cssClass : 'color-off']">
+                <span class="stimulus-hint">{{ currentColor ? currentColor.name.toUpperCase() : 'Esperando estímulo...' }}</span>
+              </div>
+              <div class="reaction-countdown-badge" :class="{ urgent: reactionIsUrgent }">Tiempo: {{ reactionTimeRemaining }}</div>
+            </div>
+
+            <div class="reaction-telemetry">
+              <div class="telemetry-item">
+                <span class="telem-label">Último Tiempo</span>
+                <span class="telem-val">{{ lastReactionMs }} ms</span>
+              </div>
+              <div class="telemetry-item">
+                <span class="telem-label">Falsas Alarmas</span>
+                <span class="telem-val danger-text">{{ reactionFalseAlarms }}</span>
+              </div>
+              <div class="telemetry-item">
+                <span class="telem-label">Promedio Actual</span>
+                <span class="telem-val">{{ currentAvgMs }} ms</span>
+              </div>
+            </div>
+
+            <div class="spacebar-prompt-area">
+              <button class="spacebar-giant-btn" :class="{ 'pressed-active': activeKey === ' ' || activeKey === 'Space' }" type="button" @pointerdown.prevent="handleReactionTrigger" aria-label="Pulsar o tocar cuando aparezca el color verde">
+                <div class="space-icon-row">
+                  <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                  </svg>
+                  <kbd class="space-kbd">ESPACIO O TOQUE</kbd>
+                </div>
+                <span class="touch-highlight-text">¡PULSAR / TOCAR AL VER VERDE!</span>
+                <small class="touch-subtext">Respuesta táctil instantánea de cero latencia</small>
+              </button>
+            </div>
+          </div>
+
+          <div class="round-progress-bar">
+            <div class="progress-fill" :style="{ width: `${(reactionSuccessCount / reactionTargetCount) * 100}%` }"></div>
+          </div>
+        </template>
       </article>
 
       <!-- PANTALLA 5: INFORME Y DICTAMEN MÉDICO FINAL -->
@@ -1606,7 +2118,7 @@ onUnmounted(() => {
         </div>
 
         <div class="results-actions-bar">
-          <button type="button" class="btn-secondary" @click="printReport">
+          <button type="button" class="btn-secondary-action" @click="printReport">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="6 9 6 2 18 2 18 9"/>
               <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
