@@ -50,6 +50,7 @@
 html {
   touch-action: manipulation;
   -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -65,8 +66,8 @@ body {
   overflow-x: hidden;
   position: relative;
   -webkit-font-smoothing: antialiased;
-  user-select: none;
   -webkit-user-select: none;
+  user-select: none;
 }
 
 /* Atmospheric Background */
@@ -1355,7 +1356,6 @@ body {
   overflow-x: auto;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  -webkit-overflow-scrolling: touch;
 }
 
 .report-table {
