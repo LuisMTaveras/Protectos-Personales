@@ -53,4 +53,27 @@ npm run dev
 # Compilar para producción
 npm run build
 ```
-Acceder a: `http://localhost:5173/`
+Acceder a: `http://localhost:5185/`
+
+---
+
+## ☁️ Despliegue en Vercel
+
+El proyecto está 100% configurado con `vercel.json` y listo para desplegar en un solo clic.
+
+### Opción A: Vía GitHub (Recomendado)
+1. Sube este repositorio a tu cuenta de GitHub.
+2. Ve a [vercel.com](https://vercel.com) e inicia sesión.
+3. Haz clic en **"Add New..."** > **"Project"**.
+4. Selecciona el repositorio y haz clic en **"Deploy"**. Vercel detectará la configuración de `vite` y `dist` de forma automática.
+
+### Opción B: Vía Vercel CLI
+En la terminal de este proyecto ejecuta:
+```bash
+npx vercel
+```
+Para producción directa:
+```bash
+npx vercel --prod
+```
+
