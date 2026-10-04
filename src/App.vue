@@ -835,10 +835,13 @@ function resetAllTests() {
 }
 
 // Manejador global de teclado físico
+const activeKey = ref(null);
+
 function onKeydown(e) {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
     e.preventDefault();
   }
+  activeKey.value = e.key;
 
   if (currentStage.value === 'vision' && eyePhase.value === 'test') {
     if (e.key === 'ArrowUp') handleVisionAnswer('up');
@@ -858,12 +861,20 @@ function onKeydown(e) {
   }
 }
 
+function onKeyup(e) {
+  if (activeKey.value === e.key || (e.code === 'Space' && activeKey.value === ' ')) {
+    activeKey.value = null;
+  }
+}
+
 onMounted(() => {
   window.addEventListener('keydown', onKeydown);
+  window.addEventListener('keyup', onKeyup);
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown);
+  window.removeEventListener('keyup', onKeyup);
   clearVisionTimers();
   clearIshiharaTimers();
   clearAudioTimers();
@@ -1167,24 +1178,24 @@ onUnmounted(() => {
           <div class="interaction-hints">
             <p class="hint-text">Identifique la hendidura de la letra C cerrada hacia cuál de las <strong>4 direcciones</strong> apunta:</p>
             <div class="dpad-controller">
-              <button class="dpad-btn up" @pointerdown.prevent="handleVisionAnswer('up')" title="Apertura hacia Arriba">
+              <button class="dpad-btn up" :class="{ 'pressed-active': activeKey === 'ArrowUp' }" @pointerdown.prevent="handleVisionAnswer('up')" title="Apertura hacia Arriba">
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
                 <kbd>&uarr; Arriba</kbd>
               </button>
               <div class="dpad-row">
-                <button class="dpad-btn left" @pointerdown.prevent="handleVisionAnswer('left')" title="Apertura hacia la Izquierda">
+                <button class="dpad-btn left" :class="{ 'pressed-active': activeKey === 'ArrowLeft' }" @pointerdown.prevent="handleVisionAnswer('left')" title="Apertura hacia la Izquierda">
                   <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
                   <kbd>&larr; Izq</kbd>
                 </button>
                 <div class="dpad-center-badge">
                   <span>{{ currentEye }}</span>
                 </div>
-                <button class="dpad-btn right" @pointerdown.prevent="handleVisionAnswer('right')" title="Apertura hacia la Derecha">
+                <button class="dpad-btn right" :class="{ 'pressed-active': activeKey === 'ArrowRight' }" @pointerdown.prevent="handleVisionAnswer('right')" title="Apertura hacia la Derecha">
                   <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
                   <kbd>Der &rarr;</kbd>
                 </button>
               </div>
-              <button class="dpad-btn down" @pointerdown.prevent="handleVisionAnswer('down')" title="Apertura hacia Abajo">
+              <button class="dpad-btn down" :class="{ 'pressed-active': activeKey === 'ArrowDown' }" @pointerdown.prevent="handleVisionAnswer('down')" title="Apertura hacia Abajo">
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
                 <kbd>&darr; Abajo</kbd>
               </button>
@@ -1307,7 +1318,11 @@ onUnmounted(() => {
             :disabled="isTestingStereo"
             @pointerdown.prevent="handleStereoTestClick"
           >
-            🔊 Probar Oídos (L/R)
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+            </svg>
+            <span>{{ isTestingStereo ? 'Probando...' : 'Probar Oídos (L/R)' }}</span>
           </button>
         </div>
 
@@ -1328,6 +1343,13 @@ onUnmounted(() => {
                 <span class="countdown-label">Tiempo límite</span>
               </div>
               <div class="audio-status-pill">{{ audioStateLabel }}</div>
+              <div v-if="isAudioWaiting" class="acoustic-wave-active" aria-hidden="true" title="Estímulo de audio emitiéndose">
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+              </div>
             </div>
 
             <div class="ear-channel-blind">
@@ -1342,7 +1364,7 @@ onUnmounted(() => {
         </div>
 
         <div class="audio-response-controls">
-          <button class="audio-resp-btn btn-left" @pointerdown.prevent="handleAudioAnswer('left')">
+          <button class="audio-resp-btn btn-left" :class="{ 'pressed-active': activeKey === 'ArrowLeft' }" @pointerdown.prevent="handleAudioAnswer('left')">
             <kbd>&larr;</kbd>
             <div class="btn-text-wrap">
               <strong>Oído Izquierdo</strong>
@@ -1350,7 +1372,7 @@ onUnmounted(() => {
             </div>
           </button>
 
-          <button class="audio-resp-btn btn-none" @pointerdown.prevent="handleAudioAnswer('none')">
+          <button class="audio-resp-btn btn-none" :class="{ 'pressed-active': activeKey === ' ' || activeKey === 'Space' }" @pointerdown.prevent="handleAudioAnswer('none')">
             <kbd>ESPACIO</kbd>
             <div class="btn-text-wrap">
               <strong>No escucho nada</strong>
@@ -1358,7 +1380,7 @@ onUnmounted(() => {
             </div>
           </button>
 
-          <button class="audio-resp-btn btn-right" @pointerdown.prevent="handleAudioAnswer('right')">
+          <button class="audio-resp-btn btn-right" :class="{ 'pressed-active': activeKey === 'ArrowRight' }" @pointerdown.prevent="handleAudioAnswer('right')">
             <div class="btn-text-wrap">
               <strong>Oído Derecho</strong>
               <small>Flecha Derecha</small>
@@ -1417,7 +1439,7 @@ onUnmounted(() => {
           </div>
 
           <div class="spacebar-prompt-area">
-            <button class="spacebar-giant-btn" type="button" @pointerdown.prevent="handleReactionTrigger" aria-label="Pulsar o tocar cuando aparezca el color verde">
+            <button class="spacebar-giant-btn" :class="{ 'pressed-active': activeKey === ' ' || activeKey === 'Space' }" type="button" @pointerdown.prevent="handleReactionTrigger" aria-label="Pulsar o tocar cuando aparezca el color verde">
               <div class="space-icon-row">
                 <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2">
                   <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>

@@ -27,8 +27,16 @@
   --text-muted: #94a3b8;
   --text-dim: #64748b;
 
-  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-heading: 'Figtree', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-sans: 'Plus Jakarta Sans', 'Noto Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
+
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
 
   --radius-xs: 6px;
   --radius-sm: 10px;
@@ -36,10 +44,13 @@
   --radius-lg: 20px;
   --radius-full: 9999px;
 
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 10px 24px rgba(0, 0, 0, 0.45);
   --shadow-panel: 0 16px 36px -10px rgba(0, 0, 0, 0.65), 0 0 0 1px var(--border-subtle);
 
   --transition-fast: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-medium: all 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 *, *::before, *::after {
@@ -47,6 +58,18 @@
   margin: 0;
   padding: 0;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Regla UI/UX Pro Max: cursor-pointer en todos los elementos interactivos */
+button, a, select, input[type="range"], input[type="checkbox"], input[type="radio"], [role="button"] {
+  cursor: pointer;
+}
+
+/* Regla UI/UX Pro Max: Anillo de enfoque visible para navegación por teclado (WCAG 2.2 AA) */
+:focus-visible {
+  outline: 2px solid var(--accent-primary) !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.3) !important;
 }
 
 html {
@@ -70,6 +93,10 @@ body {
   -webkit-font-smoothing: antialiased;
   -webkit-user-select: none;
   user-select: none;
+}
+
+h1, h2, h3, h4, .system-title, .test-tag, .btn-primary-action {
+  font-family: var(--font-heading);
 }
 
 /* Subtle Technical Grid Background (Clean & Non-distracting) */
@@ -876,11 +903,12 @@ body {
   transform: translateY(-2px);
 }
 
-.dpad-btn:active, .dpad-btn.pressed {
+.dpad-btn:active, .dpad-btn.pressed, .dpad-btn.pressed-active {
   background: var(--accent-primary);
   color: #fff;
   border-color: #38bdf8;
-  transform: scale(0.95);
+  transform: scale(0.94);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.5);
 }
 
 .dpad-btn kbd {
@@ -1084,9 +1112,11 @@ body {
   transform: translateY(-2px);
 }
 
-.audio-resp-btn:active {
+.audio-resp-btn:active, .audio-resp-btn.pressed-active {
   background: var(--accent-primary);
   transform: scale(0.96);
+  border-color: #38bdf8;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.4);
 }
 
 .audio-resp-btn.btn-right {
@@ -1249,11 +1279,12 @@ body {
   background: var(--bg-card-hover);
 }
 
-.spacebar-giant-btn:active {
+.spacebar-giant-btn:active, .spacebar-giant-btn.pressed-active {
   background: var(--accent-emerald);
   color: #022013;
   border-color: #34d399;
-  transform: scale(0.97);
+  transform: scale(0.97) translateY(2px);
+  box-shadow: 0 0 24px rgba(16, 185, 129, 0.6);
 }
 
 .space-icon-row {
@@ -1631,12 +1662,49 @@ body {
   .optotype-stage { height: 220px; }
   .traffic-light-rig { height: 210px; }
   .stimulus-light { width: 120px; height: 120px; }
-  .spacebar-giant-btn { min-height: 68px; }
   .reaction-telemetry { flex-wrap: wrap; }
   .telemetry-item { flex: 1 1 30%; min-width: 75px; }
 }
 
-/* Print Mode */
+/* Soporte de accesibilidad para preferencia de movimiento reducido (WCAG 2.2) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Onda acústica sutil en emisión audiométrica */
+.acoustic-wave-active {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 16px;
+  margin-top: 6px;
+}
+
+.acoustic-wave-active .wave-bar {
+  width: 3px;
+  height: 100%;
+  background: var(--accent-primary);
+  border-radius: 2px;
+  animation: acoustic-pulse 0.8s ease-in-out infinite alternate;
+}
+
+.acoustic-wave-active .wave-bar:nth-child(1) { animation-delay: 0.0s; height: 35%; }
+.acoustic-wave-active .wave-bar:nth-child(2) { animation-delay: 0.15s; height: 75%; }
+.acoustic-wave-active .wave-bar:nth-child(3) { animation-delay: 0.3s; height: 100%; }
+.acoustic-wave-active .wave-bar:nth-child(4) { animation-delay: 0.15s; height: 70%; }
+.acoustic-wave-active .wave-bar:nth-child(5) { animation-delay: 0.0s; height: 40%; }
+
+@keyframes acoustic-pulse {
+  0% { transform: scaleY(0.3); opacity: 0.5; }
+  100% { transform: scaleY(1); opacity: 1; }
+}
+
 @media print {
   body { background: #fff !important; color: #000 !important; }
   .clinical-grid-backdrop, .top-system-toolbar, .phase-stepper, .results-actions-bar, .toast-feedback, .view-panel:not(#viewResults) { display: none !important; }
