@@ -1,5 +1,6 @@
 // ==========================================================================
 // MÓDULO OPTOTIPO LANDOLT C (AGUDEZA VISUAL ESTANDARIZADA)
+// Espacio interior más cerrado y abertura estrecha de alta discriminación
 // ==========================================================================
 
 export const VISION_ROUNDS = [
@@ -18,8 +19,7 @@ export const ORIENTATIONS = [
 ];
 
 /**
- * Genera el SVG del Anillo Landolt con proporciones oftalmológicas de 5:1.
- * Grosor de trazo = 1/5 del diámetro exterior; corte = 1/5.
+ * Genera el SVG del Anillo C con espacio interior más cerrado y hendidura sutil.
  * @param {string} orientationId 'up' | 'down' | 'left' | 'right'
  * @param {number} sizePx Diámetro en píxeles
  * @returns {string} Código SVG interno
@@ -28,14 +28,12 @@ export function renderLandoltSvg(orientationId, sizePx) {
   const orient = ORIENTATIONS.find(o => o.id === orientationId) || ORIENTATIONS[0];
   const angle = orient.angle;
 
-  // Centro en (50, 50), radio exterior 45, radio interior 27, grosor 18
-  // Corte a la derecha de 40 grados (de +24° a -24°)
-  // Dibujamos un arco grueso con stroke
-  // Un círculo de radio 36 con stroke de 18 (diámetro total 72 + 18 = 90)
-  // Perímetro aproximado = 2 * PI * 36 = 226.19
-  // La hendidura mide 18 unidades -> stroke-dasharray = (226.19 - 22) 22 = 204.19 22
-  const circ = 2 * Math.PI * 36;
-  const gap = 24;
+  // Centro en (50, 50), radio central 32, grosor de trazo 24
+  // Radio interior = 32 - 12 = 20 (orificio interior cerrado)
+  // Perímetro = 2 * PI * 32 = 201.06
+  // Hendidura estrecha ("más cerradita") de 14 unidades
+  const circ = 2 * Math.PI * 32;
+  const gap = 14;
   const dashLength = (circ - gap).toFixed(2);
 
   return `
@@ -43,10 +41,10 @@ export function renderLandoltSvg(orientationId, sizePx) {
       <circle 
         cx="50" 
         cy="50" 
-        r="36" 
+        r="32" 
         fill="none" 
         stroke="#0f172a" 
-        stroke-width="18"
+        stroke-width="24"
         stroke-dasharray="${dashLength} ${gap}"
         stroke-dashoffset="${(circ - gap) / 2}"
         stroke-linecap="butt"
@@ -55,9 +53,6 @@ export function renderLandoltSvg(orientationId, sizePx) {
   `;
 }
 
-/**
- * Selecciona una orientación aleatoria
- */
 export function getRandomOrientation() {
   const idx = Math.floor(Math.random() * ORIENTATIONS.length);
   return ORIENTATIONS[idx];

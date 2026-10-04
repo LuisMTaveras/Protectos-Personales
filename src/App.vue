@@ -24,13 +24,17 @@ function showToast(message, type = 'info') {
 }
 
 // ==========================================================================
-// 1. PRUEBA DE VISIÓN (LANDOLT C - 4 DIRECCIONES + 2.5s)
+// 1. PRUEBA DE VISIÓN MONOCULAR BILATERAL (OJO DERECHO + OJO IZQUIERDO)
+// Letra C cerrada con hendidura fina y límite de 2.5s por intento
 // ==========================================================================
+const currentEye = ref('OD'); // 'OD' (Ojo Derecho) | 'OI' (Ojo Izquierdo)
+const eyePhase = ref('test'); // 'test' | 'transition'
 const visionRound = ref(0);
 const visionTotalRounds = 5;
 const visionSequence = ref([]);
 const currentVisionOrientation = ref(ORIENTATIONS[0]);
-const visionResults = ref([]);
+const visionResultsOD = ref([]);
+const visionResultsOI = ref([]);
 const visionTimeRemaining = ref('2.5s');
 const visionIsUrgent = ref(false);
 const isVisionWaiting = ref(false);
@@ -61,22 +65,37 @@ function clearVisionTimers() {
 
 function startVisionTest() {
   currentStage.value = 'vision';
+  currentEye.value = 'OD';
+  eyePhase.value = 'test';
   visionRound.value = 0;
-  visionResults.value = [];
+  visionResultsOD.value = [];
+  visionResultsOI.value = [];
   isVisionWaiting.value = false;
 
-  // Secuencia de 5 intentos asegurando que las 4 direcciones espaciales aparezcan
+  prepareEyeSequence();
+  nextVisionRound();
+}
+
+function prepareEyeSequence() {
   const allFour = [...ORIENTATIONS].sort(() => Math.random() - 0.5);
   const extraOne = ORIENTATIONS[Math.floor(Math.random() * ORIENTATIONS.length)];
   visionSequence.value = [...allFour, extraOne].sort(() => Math.random() - 0.5);
-
-  nextVisionRound();
 }
 
 function nextVisionRound() {
   if (visionRound.value >= visionTotalRounds) {
-    finishVisionTest();
-    return;
+    // Si terminó el ojo derecho, pasar a transición de cambio de ojo
+    if (currentEye.value === 'OD') {
+      clearVisionTimers();
+      isVisionWaiting.value = false;
+      eyePhase.value = 'transition';
+      showToast('Ojo Derecho completado. Cambie de ojo.', 'info');
+      return;
+    } else {
+      // Si terminó el ojo izquierdo, finalizar examen de visión
+      finishVisionTest();
+      return;
+    }
   }
 
   clearVisionTimers();
@@ -93,6 +112,14 @@ function nextVisionRound() {
       handleVisionTimeout();
     }
   }, 2500);
+}
+
+function continueWithLeftEye() {
+  currentEye.value = 'OI';
+  eyePhase.value = 'test';
+  visionRound.value = 0;
+  prepareEyeSequence();
+  nextVisionRound();
 }
 
 function startVisionCountdown(totalMs) {
@@ -120,7 +147,9 @@ function handleVisionAnswer(selectedDir) {
   const responseMs = Math.round(performance.now() - visionStartTime);
   playFeedbackSound(isCorrect);
 
-  visionResults.value.push({
+  const resultEntry = {
+    eye: currentEye.value === 'OD' ? 'Ojo Derecho (OD)' : 'Ojo Izquierdo (OI)',
+    eyeCode: currentEye.value,
     round: visionRound.value + 1,
     expected: currentVisionOrientation.value.label,
     expectedId: currentVisionOrientation.value.id,
@@ -129,7 +158,13 @@ function handleVisionAnswer(selectedDir) {
     snellen: currentRoundData.value.snellen,
     sizePx: currentRoundData.value.sizePx,
     timeMs: responseMs
-  });
+  };
+
+  if (currentEye.value === 'OD') {
+    visionResultsOD.value.push(resultEntry);
+  } else {
+    visionResultsOI.value.push(resultEntry);
+  }
 
   visionRound.value++;
   setTimeout(() => nextVisionRound(), 260);
@@ -140,7 +175,9 @@ function handleVisionTimeout() {
   clearVisionTimers();
   playFeedbackSound(false);
 
-  visionResults.value.push({
+  const resultEntry = {
+    eye: currentEye.value === 'OD' ? 'Ojo Derecho (OD)' : 'Ojo Izquierdo (OI)',
+    eyeCode: currentEye.value,
     round: visionRound.value + 1,
     expected: currentVisionOrientation.value.label,
     expectedId: currentVisionOrientation.value.id,
@@ -149,7 +186,13 @@ function handleVisionTimeout() {
     snellen: currentRoundData.value.snellen,
     sizePx: currentRoundData.value.sizePx,
     timeMs: 2500
-  });
+  };
+
+  if (currentEye.value === 'OD') {
+    visionResultsOD.value.push(resultEntry);
+  } else {
+    visionResultsOI.value.push(resultEntry);
+  }
 
   showToast('¡Tiempo agotado (2.5s)! Se registró como fallo.', 'error');
   visionRound.value++;
@@ -158,7 +201,7 @@ function handleVisionTimeout() {
 
 function finishVisionTest() {
   clearVisionTimers();
-  showToast('Visión completada. Pasando a Audiometría (2s por tono)...', 'success');
+  showToast('Evaluación de ambos ojos finalizada. Pasando a Audiometría...', 'success');
   setTimeout(() => {
     startAudioTest();
   }, 850);
@@ -218,13 +261,11 @@ async function nextAudioRound() {
 
   const target = audioSequence.value[audioRound.value];
 
-  // Breve silencio previo
   await new Promise(r => setTimeout(r, 600));
 
   audioStateLabel.value = '¡Escuche sus audífonos!';
   const freq = target === 'none' ? 0 : (850 + Math.floor(Math.random() * 5) * 200);
 
-  // Emisión a ciegas
   playAudiometryTone(target, 750, freq);
 
   isAudioWaiting.value = true;
@@ -320,7 +361,7 @@ function finishAudioTest() {
 }
 
 // ==========================================================================
-// 3. PRUEBA DE REFLEJOS & SEMÁFORO (LÍMITE 2.0s PARA VERDE)
+// 3. PRUEBA DE REFLEJOS & SEMÁFORO (LÍMITE 2.0s)
 // ==========================================================================
 const reactionTargetCount = 5;
 const reactionSuccessCount = ref(0);
@@ -439,7 +480,6 @@ function handleReactionTrigger() {
   const now = performance.now();
   clearReactionTimers();
 
-  // Caso 1: Luz apagada
   if (!currentColor.value) {
     reactionFalseAlarms.value++;
     playFeedbackSound(false);
@@ -453,7 +493,6 @@ function handleReactionTrigger() {
     return;
   }
 
-  // Caso 2: Luz distractora (Rojo, Amarillo, Azul)
   if (!currentColor.value.isTarget) {
     reactionFalseAlarms.value++;
     playFeedbackSound(false);
@@ -469,7 +508,6 @@ function handleReactionTrigger() {
     return;
   }
 
-  // Caso 3: Luz VERDE objetivo en menos de 2s
   const reactionMs = Math.round(now - stimulusStartTime);
   reactionTimes.value.push(reactionMs);
   reactionSuccessCount.value++;
@@ -498,13 +536,21 @@ function finishReactionTest() {
 }
 
 // ==========================================================================
-// 4. DICTAMEN MÉDICO FINAL
+// 4. DICTAMEN MÉDICO FINAL (EVALUACIÓN MONOCULAR OD + OI)
 // ==========================================================================
-const visionHits = computed(() => visionResults.value.filter(r => r.isCorrect).length);
-const visionPct = computed(() => Math.round((visionHits.value / visionTotalRounds) * 100));
+const visionHitsOD = computed(() => visionResultsOD.value.filter(r => r.isCorrect).length);
+const visionHitsOI = computed(() => visionResultsOI.value.filter(r => r.isCorrect).length);
+const visionTotalHits = computed(() => visionHitsOD.value + visionHitsOI.value);
+const visionTotalTested = computed(() => visionResultsOD.value.length + visionResultsOI.value.length);
+const visionPct = computed(() => visionTotalTested.value > 0 ? Math.round((visionTotalHits.value / visionTotalTested.value) * 100) : 0);
 
-const bestSnellen = computed(() => {
-  const correct = visionResults.value.filter(r => r.isCorrect);
+const bestSnellenOD = computed(() => {
+  const correct = visionResultsOD.value.filter(r => r.isCorrect);
+  return correct.length > 0 ? correct[correct.length - 1].snellen : 'Menor a 20/100';
+});
+
+const bestSnellenOI = computed(() => {
+  const correct = visionResultsOI.value.filter(r => r.isCorrect);
   return correct.length > 0 ? correct[correct.length - 1].snellen : 'Menor a 20/100';
 });
 
@@ -513,7 +559,7 @@ const audioPct = computed(() => Math.round((audioHits.value / audioTotalRounds) 
 
 const isApproved = computed(() => {
   const avg = typeof currentAvgMs.value === 'number' ? currentAvgMs.value : 999;
-  return visionHits.value >= 3 && audioHits.value >= 3 && avg <= 650 && reactionFalseAlarms.value <= 3;
+  return visionHitsOD.value >= 3 && visionHitsOI.value >= 3 && audioHits.value >= 3 && avg <= 650 && reactionFalseAlarms.value <= 3;
 });
 
 const verdictClass = computed(() => isApproved.value ? 'apto' : 'no-apto');
@@ -521,9 +567,9 @@ const verdictClass = computed(() => isApproved.value ? 'apto' : 'no-apto');
 const verdictOutcome = computed(() => {
   if (isApproved.value) {
     const avg = typeof currentAvgMs.value === 'number' ? currentAvgMs.value : 999;
-    if (visionHits.value === 5 && audioHits.value === 5 && avg < 380) {
+    if (visionHitsOD.value === 5 && visionHitsOI.value === 5 && audioHits.value === 5 && avg < 380) {
       return 'APTO (CALIFICACIÓN SOBRESALIENTE)';
-    } else if (visionHits.value < 4) {
+    } else if (visionHitsOD.value < 4 || visionHitsOI.value < 4) {
       return 'APTO CON CONDICIÓN (REQUIERE LENTES)';
     } else {
       return 'APTO PARA CONDUCCIÓN DE VEHÍCULOS';
@@ -534,12 +580,16 @@ const verdictOutcome = computed(() => {
 
 const verdictNotes = computed(() => {
   if (isApproved.value) {
-    if (visionHits.value < 4) {
-      return 'Aprobado condicionado al uso obligatorio de cristales correctores para conducción vial según escala Snellen obtenida.';
+    if (visionHitsOD.value < 4 || visionHitsOI.value < 4) {
+      return 'Aprobado condicionado al uso obligatorio de cristales correctores para conducción vial según la agudeza monocular obtenida en OD y OI.';
     }
-    return 'El postulante satisface plenamente los requisitos psicofísicos y sensoriales mínimos en tiempo y precisión.';
+    return 'El postulante satisface plenamente los requisitos psicofísicos y sensoriales mínimos en ambos ojos, audición a ciegas y reflejos en 2s.';
   }
-  return 'Uno o más parámetros (visión con tiempo, audiometría a ciegas o reflejos en 2s) no alcanzaron el estándar reglamentario.';
+  return 'Uno o más parámetros (visión de OD u OI con tiempo, audiometría a ciegas o reflejos en 2s) no alcanzaron el estándar reglamentario.';
+});
+
+const allVisionResultsCombined = computed(() => {
+  return [...visionResultsOD.value, ...visionResultsOI.value];
 });
 
 const currentDateFormatted = computed(() => {
@@ -556,7 +606,10 @@ function resetAllTests() {
   clearAudioTimers();
   clearReactionTimers();
   isReactionRunning = false;
-  visionResults.value = [];
+  currentEye.value = 'OD';
+  eyePhase.value = 'test';
+  visionResultsOD.value = [];
+  visionResultsOI.value = [];
   audioResults.value = [];
   reactionResults.value = null;
   currentStage.value = 'intro';
@@ -569,7 +622,7 @@ function onKeydown(e) {
     e.preventDefault();
   }
 
-  if (currentStage.value === 'vision') {
+  if (currentStage.value === 'vision' && eyePhase.value === 'test') {
     if (e.key === 'ArrowUp') handleVisionAnswer('up');
     else if (e.key === 'ArrowDown') handleVisionAnswer('down');
     else if (e.key === 'ArrowLeft') handleVisionAnswer('left');
@@ -638,7 +691,7 @@ onUnmounted(() => {
       <div class="step-connector"></div>
       <div class="step-node" :class="{ active: currentStage === 'vision', completed: ['audio', 'reaction', 'results'].includes(currentStage) }">
         <span class="step-num">1</span>
-        <span class="step-label">Visión (4 Dirs)</span>
+        <span class="step-label">Visión (OD + OI)</span>
       </div>
       <div class="step-connector"></div>
       <div class="step-node" :class="{ active: currentStage === 'audio', completed: ['reaction', 'results'].includes(currentStage) }">
@@ -669,7 +722,7 @@ onUnmounted(() => {
           </div>
           <h2 class="hero-heading">Pruebas Sensoriales y Psicométricas</h2>
           <p class="hero-desc">
-            Simulador de evaluación psicofísica para conductores en Vue 3: <strong>Agudeza Visual de Landolt (2.5s)</strong>, <strong>Localización Auditiva a Ciegas (2.0s)</strong> y <strong>Tiempo de Reacción Cromático (2.0s)</strong>.
+            Evaluación psicofísica para conductores: <strong>Agudeza Visual Bilateral (Ojo Derecho y Ojo Izquierdo con letra C cerrada)</strong>, <strong>Localización Auditiva a Ciegas (2.0s)</strong> y <strong>Tiempo de Reacción Cromático (2.0s)</strong>.
           </p>
         </div>
 
@@ -681,8 +734,8 @@ onUnmounted(() => {
                 <circle cx="12" cy="12" r="3"/>
               </svg>
             </div>
-            <h3>1. Visión Landolt (2.5s)</h3>
-            <p>Tápese un ojo. Indique la abertura entre <strong>4 direcciones</strong> (↑, ↓, ←, →) antes de agotarse el tiempo de 2.5s. Cada intento se hace más pequeño.</p>
+            <h3>1. Visión (1 con cada Ojo)</h3>
+            <p>Primero se tapará el <strong>ojo izquierdo</strong> (evaluando el derecho), y luego el <strong>ojo derecho</strong> (evaluando el izquierdo). La letra C es más cerrada por dentro y con hendidura fina (2.5s por intento).</p>
           </div>
 
           <div class="feature-card">
@@ -710,8 +763,8 @@ onUnmounted(() => {
 
         <div class="hardware-check-box">
           <div class="check-item">
-            <span class="check-badge">Móvil & PC</span>
-            <span>Optimizado para pantalla táctil en smartphones o teclado en computadoras.</span>
+            <span class="check-badge">Bilateral</span>
+            <span>Evaluación monocular separada: 5 intentos OD + 5 intentos OI.</span>
           </div>
           <button type="button" class="btn-sound-test" @pointerdown.prevent="testStereoChannels">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
@@ -733,66 +786,105 @@ onUnmounted(() => {
         </div>
       </article>
 
-      <!-- PANTALLA 1: PRUEBA DE VISIÓN -->
+      <!-- PANTALLA 1: PRUEBA DE VISIÓN (OD + OI) -->
       <article v-if="currentStage === 'vision'" class="view-panel active">
-        <div class="panel-header">
-          <div class="test-tag">PRUEBA 1 / 3 &bull; AGUDEZA VISUAL (4 DIRECCIONES)</div>
-          <div class="round-tracker">
-            <span>Intento:</span>
-            <strong>{{ visionRound + 1 }} / {{ visionTotalRounds }}</strong>
+        
+        <!-- FASE DE EXAMEN ACTIVA (OD u OI) -->
+        <template v-if="eyePhase === 'test'">
+          <div class="panel-header">
+            <div class="test-tag">
+              PRUEBA 1 / 3 &bull; AGUDEZA VISUAL
+              <span class="eye-indicator-pill">
+                {{ currentEye === 'OD' ? 'FASE 1: OJO DERECHO (OD)' : 'FASE 2: OJO IZQUIERDO (OI)' }}
+              </span>
+            </div>
+            <div class="round-tracker">
+              <span>Intento:</span>
+              <strong>{{ visionRound + 1 }} / {{ visionTotalRounds }}</strong>
+            </div>
           </div>
-        </div>
 
-        <div class="instruction-banner warning-banner">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-            <circle cx="12" cy="12" r="3"/>
-            <line x1="2" y1="2" x2="22" y2="22"/>
-          </svg>
-          <div>
-            <strong>INSTRUCCIÓN CLÍNICA:</strong> Tápese un ojo con una mano sin presionar el globo ocular. Tiene <strong>2.5 segundos</strong> por intento para pulsar la dirección correspondiente.
+          <!-- Banner dinámico según el ojo activo -->
+          <div class="instruction-banner warning-banner">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+              <line x1="2" y1="2" x2="22" y2="22"/>
+            </svg>
+            <div v-if="currentEye === 'OD'">
+              <strong>INSTRUCCIÓN CLÍNICA:</strong> Tápese el <strong>OJO IZQUIERDO</strong> con una mano sin presionar el globo ocular. Mire fijamente la pantalla con su <strong>OJO DERECHO</strong>. Tiene 2.5s por intento.
+            </div>
+            <div v-else>
+              <strong>INSTRUCCIÓN CLÍNICA:</strong> Tápese el <strong>OJO DERECHO</strong> con una mano sin presionar el globo ocular. Mire fijamente la pantalla con su <strong>OJO IZQUIERDO</strong>. Tiene 2.5s por intento.
+            </div>
           </div>
-        </div>
 
-        <div class="optotype-stage">
-          <div class="crosshair-guide"></div>
-          <div class="vision-countdown-badge" :class="{ urgent: visionIsUrgent }">Tiempo: {{ visionTimeRemaining }}</div>
-          <div class="optotype-container">
-            <svg viewBox="0 0 100 100" class="landolt-ring" :style="{ width: `${currentRoundData.sizePx}px`, height: `${currentRoundData.sizePx}px` }" v-html="currentLandoltSvg"></svg>
+          <div class="optotype-stage">
+            <div class="crosshair-guide"></div>
+            <div class="vision-countdown-badge" :class="{ urgent: visionIsUrgent }">Tiempo: {{ visionTimeRemaining }}</div>
+            <div class="optotype-container">
+              <svg viewBox="0 0 100 100" class="landolt-ring" :style="{ width: `${currentRoundData.sizePx}px`, height: `${currentRoundData.sizePx}px` }" v-html="currentLandoltSvg"></svg>
+            </div>
+            <div class="snellen-scale-badge">Escala: {{ currentRoundData.snellen }} ({{ currentRoundData.difficulty }})</div>
           </div>
-          <div class="snellen-scale-badge">Escala: {{ currentRoundData.snellen }} ({{ currentRoundData.difficulty }})</div>
-        </div>
 
-        <div class="interaction-hints">
-          <p class="hint-text">Identifique hacia cuál de las <strong>4 direcciones</strong> apunta la abertura (↑ Arriba, ↓ Abajo, ← Izquierda, → Derecha):</p>
-          <div class="dpad-controller">
-            <button class="dpad-btn up" @pointerdown.prevent="handleVisionAnswer('up')" title="Apertura hacia Arriba">
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
-              <kbd>&uarr; Arriba</kbd>
-            </button>
-            <div class="dpad-row">
-              <button class="dpad-btn left" @pointerdown.prevent="handleVisionAnswer('left')" title="Apertura hacia la Izquierda">
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
-                <kbd>&larr; Izq</kbd>
+          <div class="interaction-hints">
+            <p class="hint-text">Identifique la abertura de la letra C cerrada hacia cuál de las <strong>4 direcciones</strong> apunta:</p>
+            <div class="dpad-controller">
+              <button class="dpad-btn up" @pointerdown.prevent="handleVisionAnswer('up')" title="Apertura hacia Arriba">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+                <kbd>&uarr; Arriba</kbd>
               </button>
-              <div class="dpad-center-badge">
-                <span>4 DIRS</span>
+              <div class="dpad-row">
+                <button class="dpad-btn left" @pointerdown.prevent="handleVisionAnswer('left')" title="Apertura hacia la Izquierda">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+                  <kbd>&larr; Izq</kbd>
+                </button>
+                <div class="dpad-center-badge">
+                  <span>{{ currentEye }}</span>
+                </div>
+                <button class="dpad-btn right" @pointerdown.prevent="handleVisionAnswer('right')" title="Apertura hacia la Derecha">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                  <kbd>Der &rarr;</kbd>
+                </button>
               </div>
-              <button class="dpad-btn right" @pointerdown.prevent="handleVisionAnswer('right')" title="Apertura hacia la Derecha">
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-                <kbd>Der &rarr;</kbd>
+              <button class="dpad-btn down" @pointerdown.prevent="handleVisionAnswer('down')" title="Apertura hacia Abajo">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                <kbd>&darr; Abajo</kbd>
               </button>
             </div>
-            <button class="dpad-btn down" @pointerdown.prevent="handleVisionAnswer('down')" title="Apertura hacia Abajo">
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-              <kbd>&darr; Abajo</kbd>
+          </div>
+
+          <div class="round-progress-bar">
+            <div class="progress-fill" :style="{ width: `${((visionRound + 1) / visionTotalRounds) * 100}%` }"></div>
+          </div>
+        </template>
+
+        <!-- PANTALLA INTERMEDIA: CAMBIO DE OJO -->
+        <template v-else-if="eyePhase === 'transition'">
+          <div class="eye-switch-card">
+            <div class="eye-switch-icon">
+              <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M21 3l-6 6M15 3h6v6"/>
+              </svg>
+            </div>
+            <div class="eye-switch-badge">OJO DERECHO COMPLETADO</div>
+            <h3>¡Excelente! Ahora cambie de ojo</h3>
+            <p>
+              Descubra su <strong>ojo izquierdo</strong> y ahora <strong>tápese el ojo derecho</strong> con la mano sin presionar el globo ocular.
+            </p>
+            <button class="btn-primary-action" @pointerdown.prevent="continueWithLeftEye">
+              <span>CONTINUAR CON OJO IZQUIERDO (5 INTENTOS)</span>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="5" y1="12" x2="19" y2="12"/>
+                <polyline points="12 5 19 12 12 19"/>
+              </svg>
             </button>
           </div>
-        </div>
+        </template>
 
-        <div class="round-progress-bar">
-          <div class="progress-fill" :style="{ width: `${((visionRound + 1) / visionTotalRounds) * 100}%` }"></div>
-        </div>
       </article>
 
       <!-- PANTALLA 2: PRUEBA DE AUDIOMETRÍA -->
@@ -974,16 +1066,20 @@ onUnmounted(() => {
         </div>
 
         <div class="metrics-summary-grid">
+          <!-- Visión Monocular Bilateral -->
           <div class="metric-card">
             <div class="mcard-top">
-              <span class="mcard-title">1. Agudeza Visual</span>
+              <span class="mcard-title">1. Agudeza Visual (OD + OI)</span>
               <span class="mcard-badge">{{ visionPct }}%</span>
             </div>
-            <div class="mcard-value">{{ visionHits }} / {{ visionTotalRounds }}</div>
-            <div class="mcard-detail">Escala alcanzada: <strong>{{ bestSnellen }}</strong></div>
-            <p class="mcard-eval">Agudeza visual monocular en las 4 direcciones espaciales con límite de 2.5s.</p>
+            <div class="mcard-value">{{ visionTotalHits }} / {{ visionTotalTested }}</div>
+            <div class="mcard-detail">
+              OD: <strong>{{ bestSnellenOD }}</strong> &bull; OI: <strong>{{ bestSnellenOI }}</strong>
+            </div>
+            <p class="mcard-eval">Evaluación monocular independiente con letra C cerrada y hendidura fina.</p>
           </div>
 
+          <!-- Audiometría a Ciegas -->
           <div class="metric-card">
             <div class="mcard-top">
               <span class="mcard-title">2. Audiometría Estéreo</span>
@@ -994,6 +1090,7 @@ onUnmounted(() => {
             <p class="mcard-eval">Discriminación acústica sin pistas visuales en ventana de 2.0s.</p>
           </div>
 
+          <!-- Reflejo y Reacción -->
           <div class="metric-card">
             <div class="mcard-top">
               <span class="mcard-title">3. Reflejo & Reacción</span>
@@ -1012,16 +1109,18 @@ onUnmounted(() => {
               <thead>
                 <tr>
                   <th>Prueba</th>
+                  <th>Ojo / Canal</th>
                   <th>Intento</th>
-                  <th>Estímulo Presentado</th>
-                  <th>Respuesta del Usuario</th>
+                  <th>Estímulo</th>
+                  <th>Respuesta</th>
                   <th>Resultado</th>
                   <th>Métrica</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="r in visionResults" :key="'vis-' + r.round">
-                  <td><strong>Visión (4 Dirs, 2.5s)</strong></td>
+                <tr v-for="(r, idx) in allVisionResultsCombined" :key="'vis-all-' + idx">
+                  <td><strong>Agudeza Visual C</strong></td>
+                  <td><strong>{{ r.eye }}</strong></td>
                   <td>Ronda {{ r.round }}</td>
                   <td>Apertura {{ r.expected }}</td>
                   <td>{{ r.given }}</td>
@@ -1030,6 +1129,7 @@ onUnmounted(() => {
                 </tr>
                 <tr v-for="r in audioResults" :key="'aud-' + r.round">
                   <td><strong>Audiometría A Ciegas</strong></td>
+                  <td>Bilateral</td>
                   <td>Ronda {{ r.round }}</td>
                   <td>{{ r.targetLabel }}</td>
                   <td>{{ r.givenLabel }}</td>
@@ -1037,7 +1137,8 @@ onUnmounted(() => {
                   <td>{{ r.timeMs ? `${r.timeMs} ms / 2.0s` : '2.0s' }}</td>
                 </tr>
                 <tr v-for="(h, idx) in reactionHistory" :key="'react-' + idx">
-                  <td><strong>Reflejo Semáforo (2s)</strong></td>
+                  <td><strong>Reflejo Semáforo</strong></td>
+                  <td>Cromático</td>
                   <td>Evento {{ idx + 1 }}</td>
                   <td>Color {{ h.color }}</td>
                   <td>Toque Táctil / Espacio</td>
@@ -1069,7 +1170,6 @@ onUnmounted(() => {
           <button type="button" class="btn-primary-action" @click="resetAllTests">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="1 4 1 10 7 10"/>
-              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
             </svg>
             Nueva Evaluación
           </button>
